@@ -42,8 +42,9 @@
 USECUFFT = 1
 USECUBLAS = 1
 #keep = 1
-#verbose = 1
+verbose = 1
 #maxregisters = 20
+SMVERSION_template = 1
 
 # Add source files here
 EXECUTABLE	:= plasticity
@@ -55,6 +56,10 @@ CCFILES		:=
 ################################################################################
 # Rules and targets
 
-include ../../common/common.mk
+#ROOTDIR := ../CUDA_WORKSHOP_UIUC/common
+#include ../CUDA_WORKSHOP_UIUC/common/common.mk
+ROOTDIR := /a/CUDA_SDK_31/C/common
+BINDIR := ./build
+include common.mk
 
 LIB += -lfftw3
