@@ -142,13 +142,18 @@ ifeq ($(noinline),1)
    NVCCFLAGS   += -Xopencc -noinline
    # Compiler-specific flags, when using noinline, we don't build for SM1x
    GENCODE_SM10 := 
-   #GENCODE_SM20 := -gencode=arch=compute_20,code=\"sm_20,compute_20\"
    GENCODE_SM20 :=
+   ifdef usesm20
+      GENCODE_SM20 := -gencode=arch=compute_20,code=\"sm_20,compute_20\"
+   endif
 else
    # Compiler-specific flags (by default, we always use sm_10 and sm_20), unless we use the SMVERSION template
    GENCODE_SM10 := -gencode=arch=compute_10,code=\"sm_10,compute_10\"
    #GENCODE_SM20 := -gencode=arch=compute_20,code=\"sm_20,compute_20\"
    GENCODE_SM20 :=
+   ifdef usesm20
+      GENCODE_SM20 := -gencode=arch=compute_20,code=\"sm_20,compute_20\"
+   endif
 endif
 
 CXXFLAGS  += $(CXXWARN_FLAGS) $(CXX_ARCH_FLAGS)

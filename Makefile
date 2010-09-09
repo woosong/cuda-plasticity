@@ -45,6 +45,7 @@ USECUBLAS = 1
 verbose = 1
 #maxregisters = 20
 SMVERSION_template = 1
+#usesm20 = 1
 
 # Add source files here
 EXECUTABLE	:= plasticity

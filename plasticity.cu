@@ -173,6 +173,12 @@ runTest(int argc, char** argv)
     //calculateFlux(deviceBetaP, deviceFlux, deviceVel, width, height);
     //printf("%le\n", (double)reduceMax(deviceVel, width*height));
 
+    d_dim_vector L;
+    L.x = width;
+    L.y = height;
+#ifdef DIMENSION3
+    L.z = height;
+#endif
     //runTVD(deviceBetaP, width, height, 0., 5.00);
     double time = 0.;
     double timeInc = 0.01;
@@ -209,7 +215,7 @@ runTest(int argc, char** argv)
 #endif
         intermediateTime = time + timeInc;
         while(time < intermediateTime) {
-            double timeStep = TVD3rd(deviceBetaP, width, height, time, intermediateTime);
+            double timeStep = TVD3rd(deviceBetaP, L, time, intermediateTime);
             printf("%le +%le\n", time, timeStep);
             time += timeStep;
         }
@@ -222,7 +228,7 @@ runTest(int argc, char** argv)
     int count = 0;
     while(count++ < 10) {
         double intermediateTime = time+1.0;
-        double timeStep = TVD3rd(deviceBetaP, width, height, time, intermediateTime);
+        double timeStep = TVD3rd(deviceBetaP, L, height, time, intermediateTime);
         printf("dbg %le +%le\n", time, timeStep);
         time += timeStep;
 
@@ -246,7 +252,7 @@ runTest(int argc, char** argv)
     ContinueWriteMatrix( data_fp, hostBetaP, time, width, height*9, if_quiet); 
 
     // calculate flux
-    centralHJ<<<grid, tids>>>(deviceBetaP, sigma, rhs, velocity, width, height);
+    centralHJ<<<grid, tids>>>(deviceBetaP, sigma, rhs, velocity, L);
 
     cudaThreadSynchronize();
     cudaMemcpy(hostBetaP, rhs, mem_size, cudaMemcpyDeviceToHost);

@@ -5,11 +5,11 @@
 #define _PLASTICITY_H_
 
 //#define DEBUG_TIMESTEPS
-#define PYTHON_COMPATIBILITY
-#define PYTHON_COMPATIBILITY_TRANSPOSE_FFT
+//#define PYTHON_COMPATIBILITY
+//#define PYTHON_COMPATIBILITY_TRANSPOSE_FFT
 //#define PYTHON_COMPATIBILITY_FFTW
 // Python compatibility divide does give different results...
-#define PYTHON_COMPATIBILITY_DIVIDE
+//#define PYTHON_COMPATIBILITY_DIVIDE
 //Not relevant for python compatibility divide mode
 //#define SLOPPY_NO_DIVIDE_BY_ZERO
 
@@ -18,6 +18,8 @@
 #endif
 
 // Configuration
+// By default, 2D. 
+//#define DIMENSION3
 #define N 512
 #define lambda 1
 #define CFLsafeFactor 0.5
@@ -29,8 +31,8 @@
 #define DOUBLE
 //#define LLF
 
-#define LOADING
-#define UNIAXIAL_ZZ
+//#define LOADING
+//#define UNIAXIAL_ZZ
 //#define UNIAXIAL_XX
 //#define COLDROLLING_XY
 //#define COLDROLLING_YZ
@@ -100,6 +102,24 @@
 #define axpy cublasDaxpy
 #define vec_copy cublasDcopy
 #define ME 2.2204460492503131e-16
+#endif
+
+#ifndef DIMENSION3
+typedef int2 d_dim_vector;
+#define Lsize(L) (L.x*L.y)
+#define LKsize(L) ((L.x/2+1)*L.y)
+#define GridSize(L) ((L.x-1)/TILEX+1), L.y 
+#define KGridSize(L) ((L.x/2)*TILEX-1)/TILEX, L.y 
+#define locate(f,v,idx) (*(f+((idx)*L.y+((v.y+L.y)%L.y))*L.x+((v.x+L.x)%L.x)))
+#define locateop(f,v,op,d,idx) (*(f+((idx)*L.y+((v.y op d.y +L.y)%L.y))*L.x+((v.x op d.x +L.x)%L.x)))
+#else
+typedef int3 d_dim_vector;
+#define Lsize(L) (L.x*L.y*L.z)
+#define LKsize(L) ((L.x/2+1)*L.y*L.z)
+#define GridSize(L) ((L.x-1)/TILEX+1), L.y, L.z
+#define KGridSize(L) ((L.x/2)*TILEX-1)/TILEX, L.y, L.z
+#define locate(f,v,idx) (*(f+(((idx)*L.z+((v.z+L.z)%L.z))*L.y+((v.y+L.y)%L.y))*L.x+((v.x+L.x)%L.x)))
+#define locateop(f,v,op,d,idx) (*(f+(((idx)*L.z+(v.z op d.z +L.z)%L.z)*L.y+((v.y op d.y +L.y)%L.y))*L.x+((v.x op d.x +L.x)%L.x)))
 #endif
 
 #endif // _PLASTICITY_H_
