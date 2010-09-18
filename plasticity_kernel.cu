@@ -28,6 +28,9 @@
 static cufftHandle g_planr2c;
 static cufftHandle g_planc2r;
 
+__host__ data_type
+reduceMax( data_type* u, int size );
+
 __device__ __inline__ data_type minmod3(data_type a, data_type b, data_type c)
 {
     if (a>0 && b>0 && c>0) {
@@ -83,12 +86,38 @@ findDerivatives( data_type* u, int i, int j, d_dim_vector x, int coord, data_typ
 __device__ const int sigma_index[3][3] = {{0,1,2},{1,3,4},{2,4,5}};
 
 __global__ void
+symmetricRHS( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_dim_vector L )
+{
+    volatile int bx = blockIdx.x;     
+#ifdef DIMENSION3
+    int bz = blockIdx.y/L.y;
+    int by = blockIdx.y%L.y;
+#else
+    int by = blockIdx.y;
+#endif
+    /* x coordinate is split into threads */
+    int tx = threadIdx.x;    
+    /* Indices of the array this thread will tackle */
+    int i = threadIdx.y;
+    int j = threadIdx.z;
+    int idx = i*3+j;
+    int ix = bx*TILEX + tx;
+#ifndef DIMENSION3
+    int in_idx = by*L.x + ix;
+#else
+    int in_idx = (bz*L.y+by)*L.x+ix;
+#endif
+}
+
+__global__ void
 centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_dim_vector L )
 {
     volatile int bx = blockIdx.x;     
-    int by = blockIdx.y;
 #ifdef DIMENSION3
-    int bz = blockIdx.z;
+    int bz = blockIdx.y/L.y;
+    int by = blockIdx.y%L.y;
+#else
+    int by = blockIdx.y;
 #endif
     /* x coordinate is split into threads */
     int tx = threadIdx.x;    
@@ -218,12 +247,13 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
 
         // store in shm
         a[idx][tx] = sqrt(rhomod);
+    }
 #ifndef DIMENSION3
-    } else {
+    else {
         if (idx<8) {
             volatile int tidx = idx-4;
 #else
-    } {
+    {
         if (idx<8) {
             volatile int tidx = idx;
 #endif
@@ -318,8 +348,13 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
             v[tidx][0][tx] = vx;
             v[tidx][1][tx] = vy;
             v[tidx][2][tx] = vz;
+#ifdef DIMENSION3
         }
     }
+#else
+        }
+    }
+#endif
     __syncthreads();
 
     // FIXME - checked up until this part. rho and velocities are correct.
@@ -504,9 +539,11 @@ calculateKSigma( cdata_type* Ku, d_dim_vector L )
     // Since K-space field is supposedly unnecessary afterwards,
     // it is overwritten
     int bx = blockIdx.x;     
-    int by = blockIdx.y;
 #ifdef DIMENSION3
-    int bz = blockIdx.z;
+    int by = blockIdx.y%L.y;
+    int bz = blockIdx.y/L.y;
+#else
+    int by = blockIdx.y;
 #endif
     /* x coordinate is split into threads */
     int tx = threadIdx.x;    
@@ -543,54 +580,98 @@ calculateKSigma( cdata_type* Ku, d_dim_vector L )
 
     __shared__ cdata_type Ku_shm[3][3][TILEX];
     __shared__ cdata_type Ksig_shm[3][3][TILEX];
+    volatile data_type k_i, k_j;
  
-    k[0] = kx;
-    k[1] = ky;
-#ifndef DIMENSION3
-    k[2] = 0;
-#else
-    k[2] = kz;
-#endif
     if (ix < L.x) {
+        k[0] = kx;
+        k[1] = ky;
+#ifndef DIMENSION3
+        k[2] = 0;
+#else
+        k[2] = kz;
+#endif
+        if (j==0)
+            k_j = kx;
+        if (j==1)
+            k_j = ky;
+        if (j==2)
+            k_j = kz;
+        if (i==0)
+            k_i = kx;
+        if (i==1)
+            k_i = ky;
+        if (i==2)
+            k_i = kz;
         Ku_shm[i][j][tx] = *(Ku+in_idx+Lsize(L)*(i*3+j));
         Ksig_shm[i][j][tx] = init_cdata(0.,0.);
     }
     __syncthreads();
-
+    if (ix < L.x) {
 #ifndef DIMENSION3
-    if (ix == 0 && by == 0) 
+        if (ix == 0 && by == 0) 
 #else
-    if (ix == 0 && by == 0 && bz == 0)
+        if (ix == 0 && by == 0 && bz == 0)
 #endif
-    {
-        // This is the constant part
-        Ksig_shm[i][j][tx].x = 0.;
-        Ksig_shm[i][j][tx].y = 0.;
-        // New Boundary condition d_i u_j = 0
+        {
+            // This is the constant part
+            Ksig_shm[i][j][tx].x = 0.;
+            Ksig_shm[i][j][tx].y = 0.;
+            // New Boundary condition d_i u_j = 0
 #if 1
-        if (i==j) {
-            cdata_type betaE_trace;
-            betaE_trace.x = (Ku_shm[0][0][tx].x+Ku_shm[1][1][tx].x+Ku_shm[2][2][tx].x);
-            betaE_trace.y = (Ku_shm[0][0][tx].y+Ku_shm[1][1][tx].y+Ku_shm[2][2][tx].y);
-            Ksig_shm[i][j][tx].x -= 2*mu*nu/(1-2*nu)*betaE_trace.x;
-            Ksig_shm[i][j][tx].y -= 2*mu*nu/(1-2*nu)*betaE_trace.y;
-        }
-        Ksig_shm[i][j][tx].x -= mu*(Ku_shm[i][j][tx].x+Ku_shm[j][i][tx].x);
-        Ksig_shm[i][j][tx].y -= mu*(Ku_shm[i][j][tx].y+Ku_shm[j][i][tx].y);
+            if (i==j) {
+                cdata_type betaE_trace;
+                betaE_trace.x = (Ku_shm[0][0][tx].x+Ku_shm[1][1][tx].x+Ku_shm[2][2][tx].x);
+                betaE_trace.y = (Ku_shm[0][0][tx].y+Ku_shm[1][1][tx].y+Ku_shm[2][2][tx].y);
+                Ksig_shm[i][j][tx].x -= 2*mu*nu/(1-2*nu)*betaE_trace.x;
+                Ksig_shm[i][j][tx].y -= 2*mu*nu/(1-2*nu)*betaE_trace.y;
+            }
+            Ksig_shm[i][j][tx].x -= mu*(Ku_shm[i][j][tx].x+Ku_shm[j][i][tx].x);
+            Ksig_shm[i][j][tx].y -= mu*(Ku_shm[i][j][tx].y+Ku_shm[j][i][tx].y);
 #endif
-    } else {
-        if (ix < L.x) {
-            for(int m = 0; m < 3; m++)
+        } else {
+            cdata_type temp = init_cdata(0.,0.);
+#if 0
+#pragma unroll 1
+            for(int m = 0; m < 3; m++) {
+#pragma unroll 1
                 for(int n = 0; n < 3; n++) {
                     data_type M = ((2*mu*nu/(1-nu))*((k[m]*k[n]*(i==j)+k[i]*k[j]*(m==n))/kSq - (i==j)*(m==n)) - mu*((i==m)*(j==n)+(i==n)*(j==m)) - (2*mu/(1-nu))*k[i]*k[j]*k[m]*k[n]/kSqSq + mu*(k[i]*k[n]*(j==m)+k[i]*k[m]*(j==n)+k[j]*k[n]*(i==m)+k[j]*k[m]*(i==n))/kSq);
-                    Ksig_shm[i][j][tx].x += M * Ku_shm[m][n][tx].x;
-                    Ksig_shm[i][j][tx].y += M * Ku_shm[m][n][tx].y;
+                    //Ksig_shm[i][j][tx].x += M * Ku_shm[m][n][tx].x;
+                    //Ksig_shm[i][j][tx].y += M * Ku_shm[m][n][tx].y;
+                    temp.x += M * Ku_shm[m][n][tx].x;
+                    temp.y += M * Ku_shm[m][n][tx].y;
                 }
+            }
+#else
+                    data_type M = ((2*mu*nu/(1-nu))*((kx*kx*(i==j)+k_i*k_j*(0==0))/kSq - (i==j)*(0==0)) - mu*((i==0)*(j==0)+(i==0)*(j==0)) - (2*mu/(1-nu))*k_i*k_j*kx*kx/kSqSq + mu*(k_i*kx*(j==0)+k_i*kx*(j==0)+k_j*kx*(i==0)+k_j*kx*(i==0))/kSq);
+                    temp.x += M * Ku_shm[0][0][tx].x; temp.y += M * Ku_shm[0][0][tx].y;
+                    M = ((2*mu*nu/(1-nu))*((kx*ky*(i==j)+k_i*k_j*(0==1))/kSq - (i==j)*(0==1)) - mu*((i==0)*(j==1)+(i==1)*(j==0)) - (2*mu/(1-nu))*k_i*k_j*kx*ky/kSqSq + mu*(k_i*ky*(j==0)+k_i*kx*(j==1)+k_j*ky*(i==0)+k_j*kx*(i==1))/kSq);
+                    temp.x += M * Ku_shm[0][1][tx].x; temp.y += M * Ku_shm[0][1][tx].y;
+                    M = ((2*mu*nu/(1-nu))*((kx*kz*(i==j)+k_i*k_j*(0==2))/kSq - (i==j)*(0==2)) - mu*((i==0)*(j==2)+(i==2)*(j==0)) - (2*mu/(1-nu))*k_i*k_j*kx*kz/kSqSq + mu*(k_i*kz*(j==0)+k_i*kx*(j==2)+k_j*kz*(i==0)+k_j*kx*(i==2))/kSq);
+                    temp.x += M * Ku_shm[0][2][tx].x; temp.y += M * Ku_shm[0][2][tx].y;
+                    M = ((2*mu*nu/(1-nu))*((ky*kx*(i==j)+k_i*k_j*(1==0))/kSq - (i==j)*(1==0)) - mu*((i==1)*(j==0)+(i==0)*(j==1)) - (2*mu/(1-nu))*k_i*k_j*ky*kx/kSqSq + mu*(k_i*kx*(j==1)+k_i*ky*(j==0)+k_j*kx*(i==1)+k_j*ky*(i==0))/kSq);
+                    temp.x += M * Ku_shm[1][0][tx].x; temp.y += M * Ku_shm[1][0][tx].y;
+                    M = ((2*mu*nu/(1-nu))*((ky*ky*(i==j)+k_i*k_j*(1==1))/kSq - (i==j)*(1==1)) - mu*((i==1)*(j==1)+(i==1)*(j==1)) - (2*mu/(1-nu))*k_i*k_j*ky*ky/kSqSq + mu*(k_i*ky*(j==1)+k_i*ky*(j==1)+k_j*ky*(i==1)+k_j*ky*(i==1))/kSq);
+                    temp.x += M * Ku_shm[1][1][tx].x; temp.y += M * Ku_shm[1][1][tx].y;
+                    M = ((2*mu*nu/(1-nu))*((ky*kz*(i==j)+k_i*k_j*(1==2))/kSq - (i==j)*(1==2)) - mu*((i==1)*(j==2)+(i==2)*(j==1)) - (2*mu/(1-nu))*k_i*k_j*ky*kz/kSqSq + mu*(k_i*kz*(j==1)+k_i*ky*(j==2)+k_j*kz*(i==1)+k_j*ky*(i==2))/kSq);
+                    temp.x += M * Ku_shm[1][2][tx].x; temp.y += M * Ku_shm[1][2][tx].y;
+                    M = ((2*mu*nu/(1-nu))*((kz*kx*(i==j)+k_i*k_j*(2==0))/kSq - (i==j)*(2==0)) - mu*((i==2)*(j==0)+(i==0)*(j==2)) - (2*mu/(1-nu))*k_i*k_j*kz*kx/kSqSq + mu*(k_i*kx*(j==2)+k_i*kz*(j==0)+k_j*kx*(i==2)+k_j*kz*(i==0))/kSq);
+                    temp.x += M * Ku_shm[2][0][tx].x; temp.y += M * Ku_shm[2][0][tx].y;
+                    M = ((2*mu*nu/(1-nu))*((kz*ky*(i==j)+k_i*k_j*(2==1))/kSq - (i==j)*(2==1)) - mu*((i==2)*(j==1)+(i==1)*(j==2)) - (2*mu/(1-nu))*k_i*k_j*kz*ky/kSqSq + mu*(k_i*ky*(j==2)+k_i*kz*(j==1)+k_j*ky*(i==2)+k_j*kz*(i==1))/kSq);
+                    temp.x += M * Ku_shm[2][1][tx].x; temp.y += M * Ku_shm[2][1][tx].y;
+                    M = ((2*mu*nu/(1-nu))*((kz*kz*(i==j)+k_i*k_j*(2==2))/kSq - (i==j)*(2==2)) - mu*((i==2)*(j==2)+(i==2)*(j==2)) - (2*mu/(1-nu))*k_i*k_j*kz*kz/kSqSq + mu*(k_i*kz*(j==2)+k_i*kz*(j==2)+k_j*kz*(i==2)+k_j*kz*(i==2))/kSq);
+                    temp.x += M * Ku_shm[2][2][tx].x; temp.y += M * Ku_shm[2][2][tx].y;
+#endif
+            Ksig_shm[i][j][tx].x += temp.x;
+            Ksig_shm[i][j][tx].y += temp.y;
         }
-    }
-    if (ix < L.x) {
+#ifdef DIMENSION3
+        Ksig_shm[i][j][tx].x /= N*N*N;
+        Ksig_shm[i][j][tx].y /= N*N*N;
+#else
         Ksig_shm[i][j][tx].x /= N*N;
         Ksig_shm[i][j][tx].y /= N*N;
+#endif
         *(Ku+in_idx+Lsize(L)*(i*3+j)) = Ksig_shm[i][j][tx];
         // Division for Normalization
     }
@@ -709,6 +790,7 @@ calculateSigma( data_type* u, data_type* sigma, d_dim_vector L )
     cudaFree(out_transpose);
 #endif
     CUDA_SAFE_CALL(cudaFree(Ku));
+    printf("max sigma %lf\n", reduceMax(sigma, Lsize(L)*9));
 }
 
 #ifdef LOADING
