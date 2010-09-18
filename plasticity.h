@@ -9,7 +9,7 @@
 //#define PYTHON_COMPATIBILITY_TRANSPOSE_FFT
 //#define PYTHON_COMPATIBILITY_FFTW
 // Python compatibility divide does give different results...
-//#define PYTHON_COMPATIBILITY_DIVIDE
+#define PYTHON_COMPATIBILITY_DIVIDE
 //Not relevant for python compatibility divide mode
 //#define SLOPPY_NO_DIVIDE_BY_ZERO
 
@@ -19,14 +19,21 @@
 
 // Configuration
 // By default, 2D. 
-//#define DIMENSION3
-#define N 512
-#define lambda 1
+#define DIMENSION3
+
+#ifdef DIMENSION3
+#define FILE_PREFIX "3d_"
+#else
+#define FILE_PREFIX ""
+#endif
+
+#define N 128
+#define lambda 0
 #define CFLsafeFactor 0.5
 #define mu 0.5
 #define nu 0.3
 
-#define theta 1.0
+//#define theta 1.0
 
 #define DOUBLE
 //#define LLF
@@ -109,15 +116,15 @@ typedef int2 d_dim_vector;
 #define Lsize(L) (L.x*L.y)
 #define LKsize(L) ((L.x/2+1)*L.y)
 #define GridSize(L) ((L.x-1)/TILEX+1), L.y 
-#define KGridSize(L) ((L.x/2)*TILEX-1)/TILEX, L.y 
+#define KGridSize(L) ((L.x/2)/TILEX)+1, L.y
 #define locate(f,v,idx) (*(f+((idx)*L.y+((v.y+L.y)%L.y))*L.x+((v.x+L.x)%L.x)))
 #define locateop(f,v,op,d,idx) (*(f+((idx)*L.y+((v.y op d.y +L.y)%L.y))*L.x+((v.x op d.x +L.x)%L.x)))
 #else
 typedef int3 d_dim_vector;
 #define Lsize(L) (L.x*L.y*L.z)
 #define LKsize(L) ((L.x/2+1)*L.y*L.z)
-#define GridSize(L) ((L.x-1)/TILEX+1), L.y, L.z
-#define KGridSize(L) ((L.x/2)*TILEX-1)/TILEX, L.y, L.z
+#define GridSize(L) ((L.x-1)/TILEX+1), L.y*L.z
+#define KGridSize(L) ((L.x/2)/TILEX)+1, L.y*L.z
 #define locate(f,v,idx) (*(f+(((idx)*L.z+((v.z+L.z)%L.z))*L.y+((v.y+L.y)%L.y))*L.x+((v.x+L.x)%L.x)))
 #define locateop(f,v,op,d,idx) (*(f+(((idx)*L.z+(v.z op d.z +L.z)%L.z)*L.y+((v.y op d.y +L.y)%L.y))*L.x+((v.x op d.x +L.x)%L.x)))
 #endif
