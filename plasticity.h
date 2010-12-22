@@ -20,7 +20,7 @@
 
 // Configuration
 // By default, 2D. 
-#define DIMENSION3
+//#define DIMENSION3
 
 #ifdef DIMENSION3
 #define FILE_PREFIX "3d_"
@@ -36,7 +36,7 @@
 
 #define theta 1.0
 
-//#define DOUBLE
+#define DOUBLE
 //#define LLF
 
 //#define LOADING

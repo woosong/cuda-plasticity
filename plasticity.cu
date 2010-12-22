@@ -96,16 +96,23 @@ runTest(int argc, char** argv)
 
 #ifdef CONTINUE_RUN
     FILE *test_fp = fopen(output_fn, "rb");
-    data_type * matrix;
     if (test_fp != NULL) {
+        fclose(test_fp);
+        test_fp=NULL;
         // Saved file exists
         // Load previous state 
-        matrix = ReadMatrixFileFunc(output_fn, width, breadth*height*9+1, 1, if_quiet);
-        time = *matrix;
+        data_type * matrix;
+        matrix = ReadMatrixFileFunc(output_fn, 1, breadth*height*width*9+1, 1, if_quiet);
+        time = (double)*matrix;
+        printf(" Restarting from t=%f\n", time);
         matrix++;
+        for(i = 0; i < size; i++)
+            hostBetaP[i] = (data_type) matrix[i];
+        matrix--;
+        free(matrix);
     } else 
-#endif
     {
+#endif
     // Load from relaxed or initialized file for runs
 #ifdef LOADING
         data_type * matrix;
@@ -116,10 +123,10 @@ runTest(int argc, char** argv)
         //float * matrix;
         sprintf(input_fn, FILE_PREFIX "initial_%d_%d.mat", N, seed);
         matrix = ReadDoubleMatrixFile(input_fn, width, breadth*height*9, 0, if_quiet);
-#endif
         for(i = 0; i < size; i++)
             hostBetaP[i] = (data_type) matrix[i];
         free(matrix); matrix = NULL;
+#endif
     }
 
     double timeInc = 0.01;
