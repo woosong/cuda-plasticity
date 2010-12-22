@@ -569,6 +569,8 @@ calculateKSigma( cdata_type* Ku, d_dim_vector L )
 #ifdef DIMENSION3
     data_type kz = ((bz>N/2)?bz-N:bz)*2.*M_PI;
     kSq += kz*kz;
+#else
+    data_type kz = 0.;
 #endif
     data_type kSqSq = kSq*kSq;
     data_type k[3];
@@ -790,7 +792,7 @@ calculateSigma( data_type* u, data_type* sigma, d_dim_vector L )
     cudaFree(out_transpose);
 #endif
     CUDA_SAFE_CALL(cudaFree(Ku));
-    printf("max sigma %lf\n", reduceMax(sigma, Lsize(L)*9));
+    //printf("max sigma %lf\n", reduceMax(sigma, Lsize(L)*9));
 }
 
 #ifdef LOADING
