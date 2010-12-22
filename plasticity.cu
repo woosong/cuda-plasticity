@@ -90,48 +90,56 @@ runTest(int argc, char** argv)
 
     // Initialize the input matrices.
     printf("  Initialize the input matrices.\n");
-    /*
-    unsigned int * matrix;
-    matrix = ReadMatrixFile(input_fn, width, height*9, 0, if_quiet);
-    for(i = 0; i < 9*width*height; i++)
-        hostBetaP[i] = (data_type) matrix[i];
-    free(matrix); matrix = NULL;
-    */
-#if 0
-    for(i = 0; i < 9*width*height; i++)
-        hostBetaP[i] = 0.;
-    for(i = 0; i < width*height; i++)
-        hostBetaP[i] = sin((i%width)*2.*M_PI/width)*sin((i/width)*2.*M_PI/height);
-    hostBetaP[0] = 1;
-#else
-#ifdef LOADING
+
+    double time = 0.;
+    sprintf(output_fn, FILE_PREFIX "cuda_" RUN_DESC "_%d_" PRECISION_STR "_%d_L%d.plas", N, seed, lambda);
+
+#ifdef CONTINUE_RUN
+    FILE *test_fp = fopen(output_fn, "rb");
     data_type * matrix;
-    sprintf(input_fn, FILE_PREFIX "cuda_" RELAX_RUN_DESC "_%d_" PRECISION_STR "_%d_L%d.plas", N, seed, lambda);
-#ifdef DOUBLE
-    matrix = ReadDoubleMatrixFile(input_fn, width, breadth*height*9, 1, if_quiet);
+    if (test_fp != NULL) {
+        // Saved file exists
+        // Load previous state 
+        matrix = ReadMatrixFileFunc(output_fn, width, breadth*height*9+1, 1, if_quiet);
+        time = *matrix;
+        matrix++;
+    } else 
+#endif
+    {
+    // Load from relaxed or initialized file for runs
+#ifdef LOADING
+        data_type * matrix;
+        sprintf(input_fn, FILE_PREFIX "cuda_" RELAX_RUN_DESC "_%d_" PRECISION_STR "_%d_L%d.plas", N, seed, lambda);
+        matrix = ReadMatrixFileFunc(input_fn, width, breadth*height*9, 1, if_quiet);
 #else
-    matrix = ReadMatrixFile(input_fn, width, breadth*height*9, 1, if_quiet);
+        double * matrix;
+        //float * matrix;
+        sprintf(input_fn, FILE_PREFIX "initial_%d_%d.mat", N, seed);
+        matrix = ReadDoubleMatrixFile(input_fn, width, breadth*height*9, 0, if_quiet);
 #endif
-#else
-    double * matrix;
-    //float * matrix;
-    sprintf(input_fn, FILE_PREFIX "initial_%d_%d.mat", N, seed);
-    matrix = ReadDoubleMatrixFile(input_fn, width, breadth*height*9, 0, if_quiet);
-#endif
-    for(i = 0; i < size; i++)
-        hostBetaP[i] = (data_type) matrix[i];
-    free(matrix); matrix = NULL;
-#endif
-#if 0
-    for(i = 0; i < 9; i++) {
-        for(int j = 0; j < height; j++) {
-            for(int k = 0; k < width; k++)
-                fprintf(stdout, "%f ", hostBetaP[(i*height+j)*width+k]);
-            fprintf(stdout, "\n");
-        }
-        fprintf(stdout, "\n");
+        for(i = 0; i < size; i++)
+            hostBetaP[i] = (data_type) matrix[i];
+        free(matrix); matrix = NULL;
     }
+
+    double timeInc = 0.01;
+
+#ifdef LOADING
+    double endTime = 4.00/LOADING_RATE;
+#else
+    double endTime = 20.00;
 #endif
+    FILE *data_fp = OpenFile(output_fn, 
+#ifdef CONTINUE_RUN
+        "ab",
+#else
+        "wb", 
+#endif
+        if_quiet);
+#define XSTR(s) STR(s)
+#define STR(s) #s
+    //FILE *data_fp = OpenFile("cudaload_"XSTR(N)"_dp_L%d.plas", "wb", if_quiet);
+
     // ===================================================================
     //  Allocate device memory for the input matrices.
     //  Copy memory from the host memory to the device memory.
@@ -172,36 +180,16 @@ runTest(int argc, char** argv)
 
     setupSystem();
 
-    // Invoke the CUDA kernel here
-    //calculateSigma(deviceBetaP, deviceSigma, height, width);
-    //calculateSigma(deviceBetaP, deviceSigma, width, height);
-    //printf("%le\n", (double)reduceMax(deviceSigma, 9*width*height));
-
-    //calculateFlux(deviceBetaP, deviceFlux, deviceVel, width, height);
-    //printf("%le\n", (double)reduceMax(deviceVel, width*height));
-
     d_dim_vector L;
     L.x = width;
     L.y = height;
 #ifdef DIMENSION3
     L.z = breadth;
 #endif
-    //runTVD(deviceBetaP, width, height, 0., 5.00);
-    double time = 0.;
-    double timeInc = 0.01;
 
-#ifdef LOADING
-    double endTime = 4.00/LOADING_RATE;
-#else
-    double endTime = 20.00;
-#endif
-    sprintf(output_fn, FILE_PREFIX "cuda_" RUN_DESC "_%d_" PRECISION_STR "_%d_L%d.plas", N, seed, lambda);
-    FILE *data_fp = OpenFile(output_fn, "wb", if_quiet);
-#define XSTR(s) STR(s)
-#define STR(s) #s
-    //FILE *data_fp = OpenFile("cudaload_"XSTR(N)"_dp_L%d.plas", "wb", if_quiet);
-
-    ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*9, if_quiet); 
+    // If this is the initial slice
+    if (time==0.)
+        ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*9, if_quiet); 
 
 #ifndef DEBUG_TIMESTEPS
     while(time < endTime) {
