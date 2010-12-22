@@ -12,6 +12,7 @@
 #define PYTHON_COMPATIBILITY_DIVIDE
 //Not relevant for python compatibility divide mode
 //#define SLOPPY_NO_DIVIDE_BY_ZERO
+#define CONTINUE_RUN
 
 #ifdef DEBUG_TIMESTEPS
 #define RUN_DESC "debug"
@@ -28,14 +29,14 @@
 #endif
 
 #define N 128
-#define lambda 0
+#define lambda 1
 #define CFLsafeFactor 0.5
 #define mu 0.5
 #define nu 0.3
 
-//#define theta 1.0
+#define theta 1.0
 
-#define DOUBLE
+//#define DOUBLE
 //#define LLF
 
 //#define LOADING
@@ -79,6 +80,7 @@
 
 // From here on defines data type related definitions
 #ifndef DOUBLE
+#define ReadMatrixFileFunc ReadMatrixFile
 #define PRECISION_STR "sp"
 #define data_type float
 #define cdata_type cuComplex
@@ -95,6 +97,7 @@
 #define ME 1.0e-8
 //#define ME 1.1920929e-7
 #else
+#define ReadMatrixFileFunc ReadDoubleMatrixFile
 #define PRECISION_STR "dp"
 #define data_type double
 #define cdata_type cuDoubleComplex
