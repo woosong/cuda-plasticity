@@ -54,6 +54,12 @@ runTest(int argc, char** argv)
     CUT_DEVICE_INIT(argc, argv);
     cutGetCmdLineArgumenti(argc, (const char **) argv, "seed", &seed);
 
+#ifdef LENGTHSCALE
+    float lengthscale = 0.;
+    cutGetCmdLineArgumentf(argc, (const char **) argv, "lengthscale", &lengthscale);
+    printf("Lengthscale: %.2f\n", lengthscale);
+#endif
+
 #ifdef LOADING
     printf("Loading\n");
 #else
@@ -92,7 +98,11 @@ runTest(int argc, char** argv)
     printf("  Initialize the input matrices.\n");
 
     double time = 0.;
+#ifndef LENGTHSCALE
     sprintf(output_fn, FILE_PREFIX "cuda_" RUN_DESC "_%d_" PRECISION_STR "_%d_L%d.plas", N, seed, lambda);
+#else
+    sprintf(output_fn, FILE_PREFIX "cuda_" RUN_DESC "_%d_" PRECISION_STR "_%d_L%d_l%.2f.plas", N, seed, lambda, lengthscale);
+#endif
 
 #ifdef CONTINUE_RUN
     FILE *test_fp = fopen(output_fn, "rb");
@@ -121,18 +131,22 @@ runTest(int argc, char** argv)
 #else
         double * matrix;
         //float * matrix;
+#ifndef LENGTHSCALE
         sprintf(input_fn, FILE_PREFIX "initial_%d_%d.mat", N, seed);
+#else
+        sprintf(input_fn, FILE_PREFIX "initial_%d_%d_L%.2f.mat", N, seed, lengthscale);
+#endif
         matrix = ReadDoubleMatrixFile(input_fn, width, breadth*height*9, 0, if_quiet);
+#endif
         for(i = 0; i < size; i++)
             hostBetaP[i] = (data_type) matrix[i];
         free(matrix); matrix = NULL;
-#endif
     }
 
     double timeInc = 0.01;
 
 #ifdef LOADING
-    double endTime = 4.00/LOADING_RATE;
+    double endTime = 3.00/LOADING_RATE;
 #else
     double endTime = 20.00;
 #endif
