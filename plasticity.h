@@ -4,6 +4,9 @@
 #ifndef _PLASTICITY_H_
 #define _PLASTICITY_H_
 
+//#define TVDstep TVD3rd
+#define TVDstep simpleTVD
+
 //#define DEBUG_TIMESTEPS
 //#define PYTHON_COMPATIBILITY
 //#define PYTHON_COMPATIBILITY_TRANSPOSE_FFT
@@ -14,13 +17,16 @@
 //#define SLOPPY_NO_DIVIDE_BY_ZERO
 #define CONTINUE_RUN
 
+#define SLIPSYSTEMS
+//#define mixing 0.9
+
 #ifdef DEBUG_TIMESTEPS
 #define RUN_DESC "debug"
 #endif
 
 // Configuration
 // By default, 2D. 
-//#define DIMENSION3
+#define DIMENSION3
 
 #ifdef DIMENSION3
 #define FILE_PREFIX "3d_"
@@ -33,11 +39,12 @@
 #define CFLsafeFactor 0.5
 #define mu 0.5
 #define nu 0.3
+//#define LENGTHSCALE
 
 #define theta 1.0
 
 #define DOUBLE
-//#define LLF
+#define LLF
 
 //#define LOADING
 //#define UNIAXIAL_ZZ
@@ -45,7 +52,8 @@
 //#define COLDROLLING_XY
 //#define COLDROLLING_YZ
 //strain loading rate
-#define LOADING_RATE 0.05
+//#define LOADING_RATE 0.05
+#define LOADING_RATE 0.10
 
 #ifdef UNIAXIAL_ZZ
 // Uniaxial ZZ Loading
@@ -73,7 +81,23 @@
 #define RUN_DESC "coldyz"
 #endif
 
+#define xstr(s) str(s)
+#define str(s) #s 
+#ifdef SLIPSYSTEMS
+#define MIX_DESC ""
+#ifdef mixing
+#undef MIX_DESC
+#define MIX_DESC "_mix" xstr(mixing)
+#endif
+#define THETA_DESC ""
+#ifdef theta
+#undef THETA_DESC
+#define THETA_DESC "_t" xstr(theta)
+#endif
+#define RELAX_RUN_DESC "sliprelax" MIX_DESC THETA_DESC
+#else
 #define RELAX_RUN_DESC "relax"
+#endif
 #ifndef RUN_DESC
 #define RUN_DESC RELAX_RUN_DESC
 #endif

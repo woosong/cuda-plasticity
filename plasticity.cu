@@ -231,7 +231,7 @@ runTest(int argc, char** argv)
 #endif
         intermediateTime = time + timeInc;
         while(time < intermediateTime) {
-            double timeStep = TVD3rd(deviceBetaP, L, time, intermediateTime);
+            double timeStep = TVDstep(deviceBetaP, L, time, intermediateTime);
             printf("%le +%le\n", time, timeStep);
             time += timeStep;
         }
@@ -244,7 +244,7 @@ runTest(int argc, char** argv)
     int count = 0;
     while(count++ < 10) {
         double intermediateTime = time+1.0;
-        double timeStep = TVD3rd(deviceBetaP, L, height, time, intermediateTime);
+        double timeStep = TVDstep(deviceBetaP, L, height, time, intermediateTime);
         printf("dbg %le +%le\n", time, timeStep);
         time += timeStep;
 
