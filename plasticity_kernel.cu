@@ -331,6 +331,7 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
             vz -= du[kz][1][2][tx]*sigma[2][2][tx];
 #endif
 
+#ifndef SLIPSYSTEMS
             // FIXME - glide term
             data_type sigma_tr = (sigma[0][0][tx]+sigma[1][1][tx]+sigma[2][2][tx])/3.*lambda;
             vx += sigma_tr*(du[kx][0][0][tx]+du[kx][1][1][tx]+du[kx][2][2][tx]);
@@ -343,6 +344,7 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
             vx -= sigma_tr*(du[kz][0][2][tx]);
             vy -= sigma_tr*(du[kz][1][2][tx]);
             vz -= sigma_tr*(du[kz][2][2][tx]);
+#endif
 #endif
             // store in shm
             v[tidx][0][tx] = vx;
@@ -403,6 +405,7 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
 #ifdef LLF
     if (idx==0) {
         volatile data_type max = 0.;
+#ifndef SLIPSYSTEMS
         for(int k = 0; k<NUM_ELEM2; k++) {
             volatile data_type t = v[k][idx][tx];
             if (max < t) 
@@ -410,6 +413,15 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
             if (max < -t)
                 max = -t;
         }
+#else
+        //slip systems need different velocities and LLF only implemented
+        for(int k = 0; k<3; k++) {
+            for(int l = 0; l<3; l++) {
+                max += sigma[k][l][tx]*sigma[k][l][tx];
+            }
+        }
+        max = sqrt(max);
+#endif
         a[0][tx] = max;
         a[1][tx] = max;
         a[2][tx] = max;
@@ -420,6 +432,9 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
 #endif
     }
 #else
+#ifdef SLIPSYSTEMS
+#error No support for non-LLF for slip systems yet
+#endif
 #ifndef DIMENSION3
     if (idx<2) 
 #else
@@ -465,6 +480,8 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
         volatile int ky = (k%4)/2+2;
         volatile int kz = k/4+4;
 #endif
+
+#ifndef SLIPSYSTEMS
         // H_ij = v_l (d_l beta_ij - d_i beta_lj)
         h = du[kx][i][j][tx] * v[k][0][tx] + du[ky][i][j][tx] * v[k][1][tx];
 #ifdef DIMENSION3
@@ -503,7 +520,29 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
                     +v[k][2][tx]*(du[kz][0][0][tx]+du[kz][1][1][tx]) 
 #endif
                 )/3.*lambda;
-        }    
+        }   
+#else
+        // Slip systems dynamics
+        // H_ij = sigma_ij (|D beta_ij|)
+        volatile data_type rho = 0.;
+        if (i!=0) rho += abs(du[kx][i][j][tx]);
+        if (i!=1) rho += abs(du[ky][i][j][tx]);
+#ifdef DIMENSION3
+        if (i!=2) rho += abs(du[kz][i][j][tx]);
+#endif
+        h = sigma[i][j][tx]*rho;
+
+        // H_ij^prime = (1-m)H_ij + m \sum_{k!=i} V_k d_k beta_ij 
+#ifdef mixing
+        h *= (1.-mixing);
+        if (i!=0) h += mixing*v[k][0][tx]*(du[kx][i][j][tx]);
+        if (i!=1) h += mixing*v[k][1][tx]*(du[ky][i][j][tx]);
+#ifdef DIMENSION3
+        if (i!=2) h += mixing*v[k][2][tx]*(du[kz][i][j][tx]);
+#endif
+#endif //endif mixing
+#endif //endif SLIPSYSTEMS
+
         // add all to the derivative
         volatile int nkx = 1-kx;
         volatile int nky = 5-ky;
