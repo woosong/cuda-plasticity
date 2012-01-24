@@ -44,7 +44,7 @@ __device__ __inline__ data_type minmod3(data_type a, data_type b, data_type c)
 }
 
 __device__ __inline__ void
-findDerivatives( data_type* u, int i, int j, d_dim_vector x, int coord, data_type *deriv_p, data_type *deriv_m, d_dim_vector L)
+findDerivatives( data_type* u, int idx, d_dim_vector x, int coord, data_type *deriv_p, data_type *deriv_m, d_dim_vector L)
 {
     volatile d_dim_vector d;
     d.x = (coord==0);
@@ -52,7 +52,6 @@ findDerivatives( data_type* u, int i, int j, d_dim_vector x, int coord, data_typ
 #ifdef DIMENSION3
     d.z = (coord==2);
 #endif
-    volatile int idx = i*3+j;
     volatile data_type diff_p, diff_m;
     volatile data_type val, val_l, val_r;
     val = locate(u, x, idx);
@@ -122,9 +121,7 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
     /* x coordinate is split into threads */
     int tx = threadIdx.x;    
     /* Indices of the array this thread will tackle */
-    int i = threadIdx.y;
-    int j = threadIdx.z;
-    int idx = i*3+j;
+    int idx = threadIdx.y;
     int ix = bx*TILEX + tx;
 #ifndef DIMENSION3
     int in_idx = by*L.x + ix;
@@ -145,7 +142,7 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
 #define NUM_ELEM2 4
 #endif
     // these have all nine components 
-    __shared__ data_type du[NUM_ELEM][3][3][TILEX];
+    __shared__ data_type du[NUM_ELEM][NUM_COMP][TILEX];
 
     // these have only one among nine
     // we only need 6 for 3D, but make 8 for using for rhomod
@@ -154,7 +151,7 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
     // Specific to plasticity
     // Use a for rhomod, since it's only used in preparation
     //__shared__ data_type rhomod[4][TILEX];
-    __shared__ data_type sigma[3][3][TILEX];
+    __shared__ data_type sigma[NUM_SIG_COMP][TILEX];
     __shared__ data_type v[NUM_ELEM2][3][TILEX];
 
     d_dim_vector x;
@@ -164,12 +161,16 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
     x.z = bz;
 #endif
     // Determine the derivatives
-    findDerivatives(u, i, j, x, 0, &du[0][i][j][tx], &du[1][i][j][tx], L);
-    findDerivatives(u, i, j, x, 1, &du[2][i][j][tx], &du[3][i][j][tx], L);
+    findDerivatives(u, idx, x, 0, &du[0][idx][tx], &du[1][idx][tx], L);
+    findDerivatives(u, idx, x, 1, &du[2][idx][tx], &du[3][idx][tx], L);
 #ifdef DIMENSION3
-    findDerivatives(u, i, j, x, 2, &du[4][i][j][tx], &du[5][i][j][tx], L);
+    findDerivatives(u, idx, x, 2, &du[4][idx][tx], &du[5][idx][tx], L);
 #endif
-    sigma[i][j][tx] = locate(sig, x, idx);
+#if NUM_SIG_COMP > NUM_COMP
+#error Number of stress components must be less than or equal to number of components (otherwise modify line below to work
+#endif
+    if (idx < NUM_SIG_COMP)
+        sigma[idx][tx] = locate(sig, x, idx);
     __syncthreads();
 
 #if 0
@@ -191,6 +192,9 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
     // checked up until this part. stresses are correct.
 
     // Prepare for calculation / Plasticity specific
+#if NUM_ELEM2 > NUM_COMP
+#error Error!
+#endif
     if (idx<NUM_ELEM2) {
         // Calculate rhomod
         volatile data_type rhomod = 0.;
@@ -201,45 +205,47 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
         volatile int ky = (idx%4)/2+2;
         volatile int kz = idx/4+4;
 #endif
+
+#define IDX(i,j) (i*3+j)
         // rhomod += ux[i,j]*ux[i,j] when i!=x
-        rhomod += du[kx][1][0][tx]*du[kx][1][0][tx];
-        rhomod += du[kx][1][1][tx]*du[kx][1][1][tx];
-        rhomod += du[kx][1][2][tx]*du[kx][1][2][tx];
-        rhomod += du[kx][2][0][tx]*du[kx][2][0][tx];
-        rhomod += du[kx][2][1][tx]*du[kx][2][1][tx];
-        rhomod += du[kx][2][2][tx]*du[kx][2][2][tx];
+        rhomod += du[kx][IDX(1,0)][tx]*du[kx][IDX(1,0)][tx];
+        rhomod += du[kx][IDX(1,1)][tx]*du[kx][IDX(1,1)][tx];
+        rhomod += du[kx][IDX(1,2)][tx]*du[kx][IDX(1,2)][tx];
+        rhomod += du[kx][IDX(2,0)][tx]*du[kx][IDX(2,0)][tx];
+        rhomod += du[kx][IDX(2,1)][tx]*du[kx][IDX(2,1)][tx];
+        rhomod += du[kx][IDX(2,2)][tx]*du[kx][IDX(2,2)][tx];
 
         // rhomod += uy[i,j]*uy[i,j] when i!=y
-        rhomod += du[ky][0][0][tx]*du[ky][0][0][tx];
-        rhomod += du[ky][0][1][tx]*du[ky][0][1][tx];
-        rhomod += du[ky][0][2][tx]*du[ky][0][2][tx];
-        rhomod += du[ky][2][0][tx]*du[ky][2][0][tx];
-        rhomod += du[ky][2][1][tx]*du[ky][2][1][tx];
-        rhomod += du[ky][2][2][tx]*du[ky][2][2][tx];
+        rhomod += du[ky][IDX(0,0)][tx]*du[ky][IDX(0,0)][tx];
+        rhomod += du[ky][IDX(0,1)][tx]*du[ky][IDX(0,1)][tx];
+        rhomod += du[ky][IDX(0,2)][tx]*du[ky][IDX(0,2)][tx];
+        rhomod += du[ky][IDX(2,0)][tx]*du[ky][IDX(2,0)][tx];
+        rhomod += du[ky][IDX(2,1)][tx]*du[ky][IDX(2,1)][tx];
+        rhomod += du[ky][IDX(2,2)][tx]*du[ky][IDX(2,2)][tx];
 
 #ifdef DIMENSION3
         // rhomod += uz[z,j]*uz[z,j] when i!=z
-        rhomod += du[kz][0][0][tx]*du[kz][0][0][tx];
-        rhomod += du[kz][0][1][tx]*du[kz][0][1][tx];
-        rhomod += du[kz][0][2][tx]*du[kz][0][2][tx];
-        rhomod += du[kz][1][0][tx]*du[kz][1][0][tx];
-        rhomod += du[kz][1][1][tx]*du[kz][1][1][tx];
-        rhomod += du[kz][1][2][tx]*du[kz][1][2][tx];
+        rhomod += du[kz][IDX(0,0)][tx]*du[kz][IDX(0,0)][tx];
+        rhomod += du[kz][IDX(0,1)][tx]*du[kz][IDX(0,1)][tx];
+        rhomod += du[kz][IDX(0,2)][tx]*du[kz][IDX(0,2)][tx];
+        rhomod += du[kz][IDX(1,0)][tx]*du[kz][IDX(1,0)][tx];
+        rhomod += du[kz][IDX(1,1)][tx]*du[kz][IDX(1,1)][tx];
+        rhomod += du[kz][IDX(1,2)][tx]*du[kz][IDX(1,2)][tx];
 #endif
 
         // rhomod -= 2*ux[y,j]*uy[x,j]
-        rhomod -= 2*du[kx][1][0][tx]*du[ky][0][0][tx];
-        rhomod -= 2*du[kx][1][1][tx]*du[ky][0][1][tx];
-        rhomod -= 2*du[kx][1][2][tx]*du[ky][0][2][tx];
+        rhomod -= 2*du[kx][IDX(1,0)][tx]*du[ky][IDX(0,0)][tx];
+        rhomod -= 2*du[kx][IDX(1,1)][tx]*du[ky][IDX(0,1)][tx];
+        rhomod -= 2*du[kx][IDX(1,2)][tx]*du[ky][IDX(0,2)][tx];
 #ifdef DIMENSION3
         // rhomod -= 2*ux[z,j]*uz[x,j]
-        rhomod -= 2*du[kx][2][0][tx]*du[kz][0][0][tx];
-        rhomod -= 2*du[kx][2][1][tx]*du[kz][0][1][tx];
-        rhomod -= 2*du[kx][2][2][tx]*du[kz][0][2][tx];
+        rhomod -= 2*du[kx][IDX(2,0)][tx]*du[kz][IDX(0,0)][tx];
+        rhomod -= 2*du[kx][IDX(2,1)][tx]*du[kz][IDX(0,1)][tx];
+        rhomod -= 2*du[kx][IDX(2,2)][tx]*du[kz][IDX(0,2)][tx];
         // rhomod -= 2*uy[z,j]*uz[y,j]
-        rhomod -= 2*du[ky][2][0][tx]*du[kz][1][0][tx];
-        rhomod -= 2*du[ky][2][1][tx]*du[kz][1][1][tx];
-        rhomod -= 2*du[ky][2][2][tx]*du[kz][1][2][tx];
+        rhomod -= 2*du[ky][IDX(2,0)][tx]*du[kz][IDX(1,0)][tx];
+        rhomod -= 2*du[ky][IDX(2,1)][tx]*du[kz][IDX(1,1)][tx];
+        rhomod -= 2*du[ky][IDX(2,2)][tx]*du[kz][IDX(1,2)][tx];
 #endif
 
         if (rhomod < 0.)
@@ -275,75 +281,75 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
             // these two cancel
             // v[x] += ux[x][n]*sigma[x][n]
             // v[x] -= ux[x][n]*sigma[x][n]
-            vx = du[ky][0][0][tx]*sigma[1][0][tx];
-            vx -= du[kx][1][0][tx]*sigma[1][0][tx];
-            vx -= du[kx][2][0][tx]*sigma[2][0][tx];
-            vx += du[ky][0][1][tx]*sigma[1][1][tx];
-            vx -= du[kx][1][1][tx]*sigma[1][1][tx];
-            vx -= du[kx][2][1][tx]*sigma[2][1][tx];
-            vx += du[ky][0][2][tx]*sigma[1][2][tx];
-            vx -= du[kx][1][2][tx]*sigma[1][2][tx];
-            vx -= du[kx][2][2][tx]*sigma[2][2][tx];
+            vx = du[ky][IDX(0,0)][tx]*sigma[IDX(1,0)][tx];
+            vx -= du[kx][IDX(1,0)][tx]*sigma[IDX(1,0)][tx];
+            vx -= du[kx][IDX(2,0)][tx]*sigma[IDX(2,0)][tx];
+            vx += du[ky][IDX(0,1)][tx]*sigma[IDX(1,1)][tx];
+            vx -= du[kx][IDX(1,1)][tx]*sigma[IDX(1,1)][tx];
+            vx -= du[kx][IDX(2,1)][tx]*sigma[IDX(2,1)][tx];
+            vx += du[ky][IDX(0,2)][tx]*sigma[IDX(1,2)][tx];
+            vx -= du[kx][IDX(1,2)][tx]*sigma[IDX(1,2)][tx];
+            vx -= du[kx][IDX(2,2)][tx]*sigma[IDX(2,2)][tx];
 #ifdef DIMENSION3
             // v[x] += uz[x][n]*sigma[z][n]
-            vx += du[kz][0][0][tx]*sigma[2][0][tx];
-            vx += du[kz][0][1][tx]*sigma[2][1][tx];
-            vx += du[kz][0][2][tx]*sigma[2][2][tx];
+            vx += du[kz][IDX(0,0)][tx]*sigma[IDX(2,0)][tx];
+            vx += du[kz][IDX(0,1)][tx]*sigma[IDX(2,1)][tx];
+            vx += du[kz][IDX(0,2)][tx]*sigma[IDX(2,2)][tx];
 #endif
             // v[y] += ux[y][n]*sigma[x][n]
             // v[y] -= uy[x][n]*sigma[x][n]
             // v[y] -= uy[z][n]*sigma[z][n]
-            vy = du[kx][1][0][tx]*sigma[0][0][tx];
-            vy -= du[ky][0][0][tx]*sigma[0][0][tx];
-            vy -= du[ky][2][0][tx]*sigma[2][0][tx];
-            vy += du[kx][1][1][tx]*sigma[0][1][tx];
-            vy -= du[ky][0][1][tx]*sigma[0][1][tx];
-            vy -= du[ky][2][1][tx]*sigma[2][1][tx];
-            vy += du[kx][1][2][tx]*sigma[0][2][tx];
-            vy -= du[ky][0][2][tx]*sigma[0][2][tx];
-            vy -= du[ky][2][2][tx]*sigma[2][2][tx];
+            vy = du[kx][IDX(1,0)][tx]*sigma[IDX(0,0)][tx];
+            vy -= du[ky][IDX(0,0)][tx]*sigma[IDX(0,0)][tx];
+            vy -= du[ky][IDX(2,0)][tx]*sigma[IDX(2,0)][tx];
+            vy += du[kx][IDX(1,1)][tx]*sigma[IDX(0,1)][tx];
+            vy -= du[ky][IDX(0,1)][tx]*sigma[IDX(0,1)][tx];
+            vy -= du[ky][IDX(2,1)][tx]*sigma[IDX(2,1)][tx];
+            vy += du[kx][IDX(1,2)][tx]*sigma[IDX(0,2)][tx];
+            vy -= du[ky][IDX(0,2)][tx]*sigma[IDX(0,2)][tx];
+            vy -= du[ky][IDX(2,2)][tx]*sigma[IDX(2,2)][tx];
 #ifdef DIMENSION3
             // v[y] += uz[y][n]*sigma[z][n]
-            vy += du[kz][1][0][tx]*sigma[2][0][tx];
-            vy += du[kz][1][1][tx]*sigma[2][1][tx];
-            vy += du[kz][1][2][tx]*sigma[2][2][tx];
+            vy += du[kz][IDX(1,0)][tx]*sigma[IDX(2,0)][tx];
+            vy += du[kz][IDX(1,1)][tx]*sigma[IDX(2,1)][tx];
+            vy += du[kz][IDX(1,2)][tx]*sigma[IDX(2,2)][tx];
 #endif
 
             // v[z] += ux[z][n]*sigma[x][n]
             // v[z] += uy[z][n]*sigma[y][n]
-            vz = du[kx][2][0][tx]*sigma[0][0][tx];
-            vz += du[ky][2][0][tx]*sigma[1][0][tx];
-            vz += du[kx][2][1][tx]*sigma[0][1][tx];
-            vz += du[ky][2][1][tx]*sigma[1][1][tx];
-            vz += du[kx][2][2][tx]*sigma[0][2][tx];
-            vz += du[ky][2][2][tx]*sigma[1][2][tx];
+            vz = du[kx][IDX(2,0)][tx]*sigma[IDX(0,0)][tx];
+            vz += du[ky][IDX(2,0)][tx]*sigma[IDX(1,0)][tx];
+            vz += du[kx][IDX(2,1)][tx]*sigma[IDX(0,1)][tx];
+            vz += du[ky][IDX(2,1)][tx]*sigma[IDX(1,1)][tx];
+            vz += du[kx][IDX(2,2)][tx]*sigma[IDX(0,2)][tx];
+            vz += du[ky][IDX(2,2)][tx]*sigma[IDX(1,2)][tx];
 #ifdef DIMENSION3
             // v[z] -= uz[x][n]*sigma[x][n]
             // v[z] -= uz[y][n]*sigma[y][n]
             // these two cancel
             // v[z] += uz[z][n]*sigma[z][n]
             // v[z] -= uz[z][n]*sigma[z][n]
-            vz -= du[kz][0][0][tx]*sigma[0][0][tx];
-            vz -= du[kz][0][1][tx]*sigma[0][1][tx];
-            vz -= du[kz][0][2][tx]*sigma[0][2][tx];
-            vz -= du[kz][1][0][tx]*sigma[2][0][tx];
-            vz -= du[kz][1][1][tx]*sigma[2][1][tx];
-            vz -= du[kz][1][2][tx]*sigma[2][2][tx];
+            vz -= du[kz][IDX(0,0)][tx]*sigma[IDX(0,0)][tx];
+            vz -= du[kz][IDX(0,1)][tx]*sigma[IDX(0,1)][tx];
+            vz -= du[kz][IDX(0,2)][tx]*sigma[IDX(0,2)][tx];
+            vz -= du[kz][IDX(1,0)][tx]*sigma[IDX(2,0)][tx];
+            vz -= du[kz][IDX(1,1)][tx]*sigma[IDX(2,1)][tx];
+            vz -= du[kz][IDX(1,2)][tx]*sigma[IDX(2,2)][tx];
 #endif
 
 #ifndef SLIPSYSTEMS
             // FIXME - glide term
-            data_type sigma_tr = (sigma[0][0][tx]+sigma[1][1][tx]+sigma[2][2][tx])/3.*lambda;
-            vx += sigma_tr*(du[kx][0][0][tx]+du[kx][1][1][tx]+du[kx][2][2][tx]);
-            vy += sigma_tr*(du[ky][0][0][tx]+du[ky][1][1][tx]+du[ky][2][2][tx]);
-            vx -= sigma_tr*(du[kx][0][0][tx]+du[ky][0][1][tx]);
-            vy -= sigma_tr*(du[kx][1][0][tx]+du[ky][1][1][tx]);
-            vz -= sigma_tr*(du[kx][2][0][tx]+du[ky][2][1][tx]);
+            data_type sigma_tr = (sigma[IDX(0,0)][tx]+sigma[IDX(1,1)][tx]+sigma[IDX(2,2)][tx])/3.*lambda;
+            vx += sigma_tr*(du[kx][IDX(0,0)][tx]+du[kx][IDX(1,1)][tx]+du[kx][IDX(2,2)][tx]);
+            vy += sigma_tr*(du[ky][IDX(0,0)][tx]+du[ky][IDX(1,1)][tx]+du[ky][IDX(2,2)][tx]);
+            vx -= sigma_tr*(du[kx][IDX(0,0)][tx]+du[ky][IDX(0,1)][tx]);
+            vy -= sigma_tr*(du[kx][IDX(1,0)][tx]+du[ky][IDX(1,1)][tx]);
+            vz -= sigma_tr*(du[kx][IDX(2,0)][tx]+du[ky][IDX(2,1)][tx]);
 #ifdef DIMENSION3
-            vz += sigma_tr*(du[kz][0][0][tx]+du[kz][1][1][tx]+du[kz][2][2][tx]);
-            vx -= sigma_tr*(du[kz][0][2][tx]);
-            vy -= sigma_tr*(du[kz][1][2][tx]);
-            vz -= sigma_tr*(du[kz][2][2][tx]);
+            vz += sigma_tr*(du[kz][IDX(0,0)][tx]+du[kz][IDX(1,1)][tx]+du[kz][IDX(2,2)][tx]);
+            vx -= sigma_tr*(du[kz][IDX(0,2)][tx]);
+            vy -= sigma_tr*(du[kz][IDX(1,2)][tx]);
+            vz -= sigma_tr*(du[kz][IDX(2,2)][tx]);
 #endif
 #endif
             // store in shm
@@ -417,7 +423,7 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
         //slip systems need different velocities and LLF only implemented
         for(int k = 0; k<3; k++) {
             for(int l = 0; l<3; l++) {
-                max += sigma[k][l][tx]*sigma[k][l][tx];
+                max += sigma[IDX(k,l)][tx]*sigma[IDX(k,l)][tx];
             }
         }
         max = sqrt(max);
@@ -470,6 +476,9 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
     az = a[4][tx]+a[5][tx]+ME;
 #endif
 
+    // FIXME Let's see if we can avoid this
+    volatile int i = idx/3;
+    volatile int j = idx%3;
     // Calculate hamiltonian and derivative using these results
     for(int k=0; k<NUM_ELEM2; k++) {
         volatile data_type h;
@@ -483,26 +492,26 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
 
 #ifndef SLIPSYSTEMS
         // H_ij = v_l (d_l beta_ij - d_i beta_lj)
-        h = du[kx][i][j][tx] * v[k][0][tx] + du[ky][i][j][tx] * v[k][1][tx];
+        h = du[kx][idx][tx] * v[k][0][tx] + du[ky][idx][tx] * v[k][1][tx];
 #ifdef DIMENSION3
-        h += du[kz][i][j][tx] * v[k][2][tx];
+        h += du[kz][idx][tx] * v[k][2][tx];
 #endif
         if (i==0) {
-            h -= v[k][0][tx] * du[kx][0][j][tx];
-            h -= v[k][1][tx] * du[kx][1][j][tx];
-            h -= v[k][2][tx] * du[kx][2][j][tx];
+            h -= v[k][0][tx] * du[kx][IDX(0,j)][tx];
+            h -= v[k][1][tx] * du[kx][IDX(1,j)][tx];
+            h -= v[k][2][tx] * du[kx][IDX(2,j)][tx];
         } else {
             if (i==1) {
-                h -= v[k][0][tx] * du[ky][0][j][tx];
-                h -= v[k][1][tx] * du[ky][1][j][tx];
-                h -= v[k][2][tx] * du[ky][2][j][tx];
+                h -= v[k][0][tx] * du[ky][IDX(0,j)][tx];
+                h -= v[k][1][tx] * du[ky][IDX(1,j)][tx];
+                h -= v[k][2][tx] * du[ky][IDX(2,j)][tx];
             }
 #ifdef DIMENSION3
             else {
                 if (i==2) {
-                    h -= v[k][0][tx] * du[kz][0][j][tx];
-                    h -= v[k][1][tx] * du[kz][1][j][tx];
-                    h -= v[k][2][tx] * du[kz][2][j][tx];
+                    h -= v[k][0][tx] * du[kz][IDX(0,j)][tx];
+                    h -= v[k][1][tx] * du[kz][IDX(1,j)][tx];
+                    h -= v[k][2][tx] * du[kz][IDX(2,j)][tx];
                 }
             }
 #endif
@@ -511,13 +520,13 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
         // Glide only correction
         // H_ij += lambda v_l / 3 (d_l beta_kk - d_k beta_lk)
         if (i==j) {
-            h -= (v[k][0][tx]*(du[kx][1][1][tx]+du[kx][2][2][tx]-du[ky][0][1][tx])
-                    +v[k][1][tx]*(du[ky][0][0][tx]+du[ky][2][2][tx]-du[kx][1][0][tx])
-                    -v[k][2][tx]*(du[kx][2][0][tx]+du[ky][2][1][tx])
+            h -= (v[k][0][tx]*(du[kx][IDX(1,1)][tx]+du[kx][IDX(2,2)][tx]-du[ky][IDX(0,1)][tx])
+                    +v[k][1][tx]*(du[ky][IDX(0,0)][tx]+du[ky][IDX(2,2)][tx]-du[kx][IDX(1,0)][tx])
+                    -v[k][2][tx]*(du[kx][IDX(2,0)][tx]+du[ky][IDX(2,1)][tx])
 #ifdef DIMENSION3
-                    -v[k][0][tx]*(du[kz][0][2][tx])
-                    -v[k][1][tx]*(du[kz][1][2][tx])
-                    +v[k][2][tx]*(du[kz][0][0][tx]+du[kz][1][1][tx]) 
+                    -v[k][0][tx]*(du[kz][IDX(0,2)][tx])
+                    -v[k][1][tx]*(du[kz][IDX(1,2)][tx])
+                    +v[k][2][tx]*(du[kz][IDX(0,0)][tx]+du[kz][IDX(1,1)][tx]) 
 #endif
                 )/3.*lambda;
         }   
@@ -525,20 +534,21 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
         // Slip systems dynamics
         // H_ij = sigma_ij (|D beta_ij|)
         volatile data_type rho = 0.;
-        if (i!=0) rho += abs(du[kx][i][j][tx]);
-        if (i!=1) rho += abs(du[ky][i][j][tx]);
+        if (i!=0) rho += abs(du[kx][idx][tx]);
+        if (i!=1) rho += abs(du[ky][idx][tx]);
 #ifdef DIMENSION3
-        if (i!=2) rho += abs(du[kz][i][j][tx]);
+        if (i!=2) rho += abs(du[kz][idx][tx]);
 #endif
-        h = sigma[i][j][tx]*rho;
+        // FIXME - need to be careful when extending fields
+        h = sigma[idx][tx]*rho;
 
         // H_ij^prime = (1-m)H_ij + m \sum_{k!=i} V_k d_k beta_ij 
 #ifdef mixing
         h *= (1.-mixing);
-        if (i!=0) h += mixing*v[k][0][tx]*(du[kx][i][j][tx]);
-        if (i!=1) h += mixing*v[k][1][tx]*(du[ky][i][j][tx]);
+        if (i!=0) h += mixing*v[k][0][tx]*(du[kx][idx][tx]);
+        if (i!=1) h += mixing*v[k][1][tx]*(du[ky][idx][tx]);
 #ifdef DIMENSION3
-        if (i!=2) h += mixing*v[k][2][tx]*(du[kz][i][j][tx]);
+        if (i!=2) h += mixing*v[k][2][tx]*(du[kz][idx][tx]);
 #endif
 #endif //endif mixing
 #endif //endif SLIPSYSTEMS
@@ -556,11 +566,11 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
 
     // diffusion term FIXME
     //if (i!=0)
-        derivative += (du[0][i][j][tx]-du[1][i][j][tx])*a[0][tx]*a[1][tx]/ax;
+        derivative += (du[0][idx][tx]-du[1][idx][tx])*a[0][tx]*a[1][tx]/ax;
     //if (i!=1)
-        derivative += (du[2][i][j][tx]-du[3][i][j][tx])*a[2][tx]*a[3][tx]/ay;
+        derivative += (du[2][idx][tx]-du[3][idx][tx])*a[2][tx]*a[3][tx]/ay;
 #ifdef DIMENSION3
-        derivative += (du[4][i][j][tx]-du[5][i][j][tx])*a[4][tx]*a[5][tx]/az;
+        derivative += (du[4][idx][tx]-du[5][idx][tx])*a[4][tx]*a[5][tx]/az;
 #endif
     *(rhs+idx*Lsize(L)+in_idx) = derivative;
     if (idx==0)
@@ -860,9 +870,9 @@ __host__ void
 calculateFlux( data_type t, data_type* u, data_type* rhs, data_type* velocity, d_dim_vector L )
 {
     dim3 grid(GridSize(L));
-    dim3 tids(TILEX, 3, 3);
+    dim3 tids(TILEX, NUM_COMP);
     data_type *sigma;
-    CUDA_SAFE_CALL(cudaMalloc((void**) &sigma, sizeof(data_type)*Lsize(L)*9));
+    CUDA_SAFE_CALL(cudaMalloc((void**) &sigma, sizeof(data_type)*Lsize(L)*NUM_SIG_COMP));
 
     calculateSigma(u, sigma, L);
     cudaThreadSynchronize();
@@ -900,7 +910,7 @@ simpleTVD( data_type* u, d_dim_vector L, data_type time, data_type endTime)
 {
     data_type *rhs, *velocity;
     double timestep = 0.;
-    CUDA_SAFE_CALL(cudaMalloc((void**) &rhs, sizeof(data_type)*Lsize(L)*9));
+    CUDA_SAFE_CALL(cudaMalloc((void**) &rhs, sizeof(data_type)*Lsize(L)*NUM_COMP));
     CUDA_SAFE_CALL(cudaMalloc((void**) &velocity, sizeof(data_type)*Lsize(L)));
 
     calculateFlux(time, u, rhs, velocity, L);
@@ -924,19 +934,19 @@ TVD3rd( data_type* u, d_dim_vector L, data_type time, data_type endTime)
     const data_type alpha[3][3] = {{1.,0.,0.}, {3./4.,1./4.,0.}, {1./3.,0.,2./3.}};
     const data_type beta[3][3] = {{1.,0.,0.}, {0.,1./4.,0.}, {0.,0.,2./3.}};
 
-    CUDA_SAFE_CALL(cudaMalloc((void**) &F0, sizeof(data_type)*Lsize(L)*9));
-    CUDA_SAFE_CALL(cudaMalloc((void**) &F1, sizeof(data_type)*Lsize(L)*9));
-    CUDA_SAFE_CALL(cudaMalloc((void**) &F2, sizeof(data_type)*Lsize(L)*9));
-    cudaMemset(F0, 0, sizeof(data_type)*Lsize(L)*9);
-    cudaMemset(F1, 0, sizeof(data_type)*Lsize(L)*9);
-    cudaMemset(F2, 0, sizeof(data_type)*Lsize(L)*9);
-    CUDA_SAFE_CALL(cudaMalloc((void**) &L0, sizeof(data_type)*Lsize(L)*9));
-    CUDA_SAFE_CALL(cudaMalloc((void**) &L1, sizeof(data_type)*Lsize(L)*9));
-    CUDA_SAFE_CALL(cudaMalloc((void**) &L2, sizeof(data_type)*Lsize(L)*9));
-    cudaMemset(L0, 0, sizeof(data_type)*Lsize(L)*9);
-    cudaMemset(L1, 0, sizeof(data_type)*Lsize(L)*9);
-    cudaMemset(L2, 0, sizeof(data_type)*Lsize(L)*9);
-    CUDA_SAFE_CALL(cudaMalloc((void**) &rhs, sizeof(data_type)*Lsize(L)*9));
+    CUDA_SAFE_CALL(cudaMalloc((void**) &F0, sizeof(data_type)*Lsize(L)*NUM_COMP));
+    CUDA_SAFE_CALL(cudaMalloc((void**) &F1, sizeof(data_type)*Lsize(L)*NUM_COMP));
+    CUDA_SAFE_CALL(cudaMalloc((void**) &F2, sizeof(data_type)*Lsize(L)*NUM_COMP));
+    cudaMemset(F0, 0, sizeof(data_type)*Lsize(L)*NUM_COMP);
+    cudaMemset(F1, 0, sizeof(data_type)*Lsize(L)*NUM_COMP);
+    cudaMemset(F2, 0, sizeof(data_type)*Lsize(L)*NUM_COMP);
+    CUDA_SAFE_CALL(cudaMalloc((void**) &L0, sizeof(data_type)*Lsize(L)*NUM_COMP));
+    CUDA_SAFE_CALL(cudaMalloc((void**) &L1, sizeof(data_type)*Lsize(L)*NUM_COMP));
+    CUDA_SAFE_CALL(cudaMalloc((void**) &L2, sizeof(data_type)*Lsize(L)*NUM_COMP));
+    cudaMemset(L0, 0, sizeof(data_type)*Lsize(L)*NUM_COMP);
+    cudaMemset(L1, 0, sizeof(data_type)*Lsize(L)*NUM_COMP);
+    cudaMemset(L2, 0, sizeof(data_type)*Lsize(L)*NUM_COMP);
+    CUDA_SAFE_CALL(cudaMalloc((void**) &rhs, sizeof(data_type)*Lsize(L)*NUM_COMP));
     CUDA_SAFE_CALL(cudaMalloc((void**) &velocity, sizeof(data_type)*Lsize(L)));
 
     calculateFlux(time, u, rhs, velocity, L);

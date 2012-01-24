@@ -4,6 +4,9 @@
 #ifndef _PLASTICITY_H_
 #define _PLASTICITY_H_
 
+#define NUM_COMP 9
+#define NUM_SIG_COMP 9
+
 //#define TVDstep TVD3rd
 #define TVDstep simpleTVD
 
@@ -17,7 +20,7 @@
 //#define SLOPPY_NO_DIVIDE_BY_ZERO
 #define CONTINUE_RUN
 
-#define SLIPSYSTEMS
+//#define SLIPSYSTEMS
 //#define mixing 0.9
 
 #ifdef DEBUG_TIMESTEPS
@@ -34,7 +37,7 @@
 #define FILE_PREFIX ""
 #endif
 
-#define N 128
+#define N 32
 #define lambda 1
 #define CFLsafeFactor 0.5
 #define mu 0.5
