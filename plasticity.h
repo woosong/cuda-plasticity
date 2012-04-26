@@ -20,6 +20,9 @@
 //#define SLOPPY_NO_DIVIDE_BY_ZERO
 #define CONTINUE_RUN
 
+#define NEWGLIDEONLY
+#define RUN_DESC "ngo"
+
 //#define SLIPSYSTEMS
 //#define mixing 0.9
 
@@ -29,7 +32,7 @@
 
 // Configuration
 // By default, 2D. 
-#define DIMENSION3
+//#define DIMENSION3
 
 #ifdef DIMENSION3
 #define FILE_PREFIX "3d_"
@@ -37,12 +40,26 @@
 #define FILE_PREFIX ""
 #endif
 
-#define N 32
-#define lambda 1
+#define N 1024 
+#define lambda 0
 #define CFLsafeFactor 0.5
 #define mu 0.5
 #define nu 0.3
 //#define LENGTHSCALE
+
+#define DYNAMIC_NUCLEATION
+
+//#define VACANCIES
+#ifdef VACANCIES
+#define PI2              2*3.14159265
+#define NUM_COMP         10
+#define VACANCY_COMP     9
+#define vacancycost      1e2  
+#define vacancydiffusion 1e-4
+#define FILE_PREFIX2 "vac_"
+#else
+#define FILE_PREFIX2 ""
+#endif
 
 #define theta 1.0
 
@@ -52,11 +69,12 @@
 //#define LOADING
 //#define UNIAXIAL_ZZ
 //#define UNIAXIAL_XX
+//#define UNIAXIAL_YY
 //#define COLDROLLING_XY
 //#define COLDROLLING_YZ
 //strain loading rate
 //#define LOADING_RATE 0.05
-#define LOADING_RATE 0.10
+//#define LOADING_RATE 0.001
 
 #ifdef UNIAXIAL_ZZ
 // Uniaxial ZZ Loading
@@ -71,7 +89,7 @@
 #ifdef UNIAXIAL_YY
 // Uniaxial YY
 #define LOAD_DEF {{-0.5,0,0},{0,1.0,0},{0,0,-0.5}}
-#define RUN_DESC "unixy"
+#define RUN_DESC "uniyy"
 #endif
 #ifdef COLDROLLING_XY
 // Cold Rolling XY
@@ -157,6 +175,11 @@ typedef int3 d_dim_vector;
 #define KGridSize(L) ((L.x/2)/TILEX)+1, L.y*L.z
 #define locate(f,v,idx) (*(f+(((idx)*L.z+((v.z+L.z)%L.z))*L.y+((v.y+L.y)%L.y))*L.x+((v.x+L.x)%L.x)))
 #define locateop(f,v,op,d,idx) (*(f+(((idx)*L.z+(v.z op d.z +L.z)%L.z)*L.y+((v.y op d.y +L.y)%L.y))*L.x+((v.x op d.x +L.x)%L.x)))
+#endif
+
+#ifdef DYNAMIC_NUCLEATION
+extern data_type maxNucleationTimestep;
+extern data_type *beta0dot;
 #endif
 
 #endif // _PLASTICITY_H_

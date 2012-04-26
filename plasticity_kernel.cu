@@ -28,8 +28,15 @@
 static cufftHandle g_planr2c;
 static cufftHandle g_planc2r;
 
+#ifdef DYNAMIC_NUCLEATION
+data_type maxNucleationTimestep;
+data_type *beta0dot;
+#endif
+
 __host__ data_type
 reduceMax( data_type* u, int size );
+__host__ void
+updateField( data_type* u, data_type timeStep, data_type *rhs, int size);
 
 __device__ __inline__ data_type minmod3(data_type a, data_type b, data_type c)
 {
@@ -122,6 +129,11 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
     int tx = threadIdx.x;    
     /* Indices of the array this thread will tackle */
     int idx = threadIdx.y;
+  
+    // FIXME Let's see if we can avoid this
+    int i = idx/3;
+    int j = idx%3;
+
     int ix = bx*TILEX + tx;
 #ifndef DIMENSION3
     int in_idx = by*L.x + ix;
@@ -160,17 +172,34 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
 #ifdef DIMENSION3
     x.z = bz;
 #endif
+
+#ifdef VACANCIES
+    if (idx < VACANCY_COMP) {
+#endif
     // Determine the derivatives
     findDerivatives(u, idx, x, 0, &du[0][idx][tx], &du[1][idx][tx], L);
     findDerivatives(u, idx, x, 1, &du[2][idx][tx], &du[3][idx][tx], L);
 #ifdef DIMENSION3
     findDerivatives(u, idx, x, 2, &du[4][idx][tx], &du[5][idx][tx], L);
 #endif
+#ifdef VACANCIES
+    }
+#endif
+
+
 #if NUM_SIG_COMP > NUM_COMP
-#error Number of stress components must be less than or equal to number of components (otherwise modify line below to work
+#error Number of stress components must be less than or equal to number of components (otherwise modify line below to work)
 #endif
     if (idx < NUM_SIG_COMP)
+    {
         sigma[idx][tx] = locate(sig, x, idx);
+#ifdef VACANCIES
+        // take the cost of the vacancies off of the stress
+        if (i==j) 
+         //*(sigma+in_idx+(i*3+j)*Lsize(L)) -= vacancycost * .... 
+          sigma[idx][tx] -= vacancycost * locate(u, x, VACANCY_COMP);
+#endif
+    }
     __syncthreads();
 
 #if 0
@@ -252,6 +281,9 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
             rhomod = 0.;
 
         // store in shm
+#ifdef VACANCIES
+        if (idx < VACANCY_COMP)
+#endif
         a[idx][tx] = sqrt(rhomod);
     }
 #ifndef DIMENSION3
@@ -352,7 +384,73 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
             vz -= sigma_tr*(du[kz][IDX(2,2)][tx]);
 #endif
 #endif
-            // store in shm
+
+
+#ifdef NEWGLIDEONLY
+#ifndef DIMENSION3
+	volatile data_type rhorho = ME;
+ 	volatile data_type uxTr   = 0.;
+	volatile data_type uyTr   = 0.;
+
+	uxTr = du[kx][IDX(0,0)][tx]+du[kx][IDX(1,1)][tx]+du[kx][IDX(2,2)][tx];
+	uyTr = du[ky][IDX(0,0)][tx]+du[ky][IDX(1,1)][tx]+du[ky][IDX(2,2)][tx];
+
+	rhorho += uxTr*uxTr + uyTr*uyTr;
+	rhorho += (du[kx][IDX(0,0)][tx]+du[ky][IDX(0,1)][tx])*
+		      (du[kx][IDX(0,0)][tx]+du[ky][IDX(0,1)][tx]);
+	rhorho += (du[kx][IDX(1,0)][tx]+du[ky][IDX(1,1)][tx])*
+		      (du[kx][IDX(1,0)][tx]+du[ky][IDX(1,1)][tx]);
+	rhorho += (du[kx][IDX(2,0)][tx]+du[ky][IDX(2,1)][tx])*
+		      (du[kx][IDX(2,0)][tx]+du[ky][IDX(2,1)][tx]);
+	rhorho -= 2*uxTr*(du[kx][IDX(0,0)][tx] + du[ky][IDX(0,1)][tx]);
+	rhorho -= 2*uyTr*(du[kx][IDX(1,0)][tx] + du[ky][IDX(1,1)][tx]);
+        
+	volatile data_type rhov = ME;
+
+	rhov += vx*(du[kx][IDX(2,2)][tx]+du[kx][IDX(1,1)][tx]-du[ky][IDX(0,1)][tx]);
+	rhov += vy*(du[ky][IDX(0,0)][tx]+du[ky][IDX(2,2)][tx]-du[kx][IDX(1,0)][tx]);
+	rhov -= vz*(du[kx][IDX(2,0)][tx]+du[ky][IDX(2,1)][tx]);
+
+    rhov = rhov/rhorho;
+	
+	vx += (du[kx][IDX(1,1)][tx]+du[kx][IDX(2,2)][tx]-du[ky][IDX(0,1)][tx])*rhov;
+	vy += (du[ky][IDX(0,0)][tx]+du[ky][IDX(2,2)][tx]-du[kx][IDX(1,0)][tx])*rhov;
+	vz -= (du[kx][IDX(2,0)][tx]+du[ky][IDX(2,1)][tx])*rhov;
+#else
+	volatile data_type rhorho = ME;
+    volatile data_type uxTr   = 0.;
+    volatile data_type uyTr   = 0.;
+	volatile data_type uzTr   = 0.;
+
+    uxTr = du[kx][IDX(0,0)][tx]+du[kx][IDX(1,1)][tx]+du[kx][IDX(2,2)][tx];
+    uyTr = du[ky][IDX(0,0)][tx]+du[ky][IDX(1,1)][tx]+du[ky][IDX(2,2)][tx];
+	uzTr = du[kz][IDX(0,0)][tx]+du[kz][IDX(1,1)][tx]+du[kz][IDX(2,2)][tx];
+
+    rhorho += uxTr*uxTr + uyTr*uyTr + uzTr*uzTr;
+    rhorho += (du[kx][IDX(0,0)][tx]+du[ky][IDX(0,1)][tx]+du[kz][IDX(0,2)][tx])*
+              (du[kx][IDX(0,0)][tx]+du[ky][IDX(0,1)][tx]+du[kz][IDX(0,2)][tx]);
+    rhorho += (du[kx][IDX(1,0)][tx]+du[ky][IDX(1,1)][tx]+du[kz][IDX(1,2)][tx])*
+              (du[kx][IDX(1,0)][tx]+du[ky][IDX(1,1)][tx]+du[kz][IDX(1,2)][tx]);
+    rhorho += (du[kx][IDX(2,0)][tx]+du[ky][IDX(2,1)][tx]+du[kz][IDX(2,2)][tx])*
+              (du[kx][IDX(2,0)][tx]+du[ky][IDX(2,1)][tx]+du[kz][IDX(2,2)][tx]);
+    rhorho -= 2*uxTr*(du[kx][IDX(0,0)][tx] + du[ky][IDX(0,1)][tx] + du[kz][IDX(0,2)][tx]);
+    rhorho -= 2*uyTr*(du[kx][IDX(1,0)][tx] + du[ky][IDX(1,1)][tx] + du[kz][IDX(1,2)][tx]);
+	rhorho -= 2*uzTr*(du[kx][IDX(2,0)][tx] + du[ky][IDX(2,1)][tx] + du[kz][IDX(2,2)][tx]);
+
+    volatile data_type rhov = ME;
+
+    rhov += vx*(du[kx][IDX(2,2)][tx]+du[kx][IDX(1,1)][tx]-du[ky][IDX(0,1)][tx]-du[kz][IDX(0,2)][tx]);
+    rhov += vy*(du[ky][IDX(0,0)][tx]+du[ky][IDX(2,2)][tx]-du[kx][IDX(1,0)][tx]-du[kz][IDX(1,2)][tx]);
+    rhov += vz*(du[kz][IDX(0,0)][tx]+du[kz][IDX(1,1)][tx]-du[kx][IDX(2,0)][tx]-du[ky][IDX(2,1)][tx]);
+
+    rhov = rhov/rhorho;
+
+    vx += (du[kx][IDX(1,1)][tx]+du[kx][IDX(2,2)][tx]-du[ky][IDX(0,1)][tx]-du[kz][IDX(0,2)][tx])*rhov;
+    vy += (du[ky][IDX(0,0)][tx]+du[ky][IDX(2,2)][tx]-du[kx][IDX(1,0)][tx]-du[kz][IDX(1,2)][tx])*rhov;
+    vz += (du[kz][IDX(0,0)][tx]+du[kz][IDX(1,1)][tx]-du[kx][IDX(2,0)][tx]-du[ky][IDX(2,1)][tx])*rhov;
+#endif
+#endif
+             // store in shm
             v[tidx][0][tx] = vx;
             v[tidx][1][tx] = vy;
             v[tidx][2][tx] = vz;
@@ -476,10 +574,11 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
     az = a[4][tx]+a[5][tx]+ME;
 #endif
 
-    // FIXME Let's see if we can avoid this
-    volatile int i = idx/3;
-    volatile int j = idx%3;
     // Calculate hamiltonian and derivative using these results
+#ifdef VACANCIES
+    if (idx < VACANCY_COMP)
+    {
+#endif
     for(int k=0; k<NUM_ELEM2; k++) {
         volatile data_type h;
         volatile int kx = k%2;
@@ -572,7 +671,21 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
 #ifdef DIMENSION3
         derivative += (du[4][idx][tx]-du[5][idx][tx])*a[4][tx]*a[5][tx]/az;
 #endif
+#ifdef VACANCIES
+    } // matches idx < VACANCY_COMP
+#endif
+
     *(rhs+idx*Lsize(L)+in_idx) = derivative;
+
+#ifdef VACANCIES
+    __syncthreads();
+    if (idx == VACANCY_COMP){
+        *(rhs+idx*Lsize(L)+in_idx) =  ( *(rhs+0*Lsize(L)+in_idx) +
+                                        *(rhs+4*Lsize(L)+in_idx) +
+                                        *(rhs+8*Lsize(L)+in_idx)  );
+    }
+#endif
+
     if (idx==0)
         *(velocity+in_idx) = ax+ay
 #ifdef DIMENSION3
@@ -580,6 +693,85 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
 #endif
                              ;
 }
+
+#ifdef VACANCIES
+__global__ void
+calculateKDiffusion( cdata_type* Ku, d_dim_vector L, data_type dt )
+{
+    // This kernel calculates the sigma in k-space
+    // Since K-space field is supposedly unnecessary afterwards,
+    // it is overwritten
+    int bx = blockIdx.x;     
+#ifdef DIMENSION3
+    int by = blockIdx.y%L.y;
+    int bz = blockIdx.y/L.y;
+#else
+    int by = blockIdx.y;
+#endif
+    /* x coordinate is split into threads */
+    int tx = threadIdx.x;    
+    /* Indices of the array this thread will tackle */
+    int i = threadIdx.y;
+    int j = threadIdx.z;
+    int ix = bx*TILEX + tx;
+#ifndef DIMENSION3
+    int in_idx = by*L.x + ix;
+#else
+    int in_idx = (bz*L.y+by)*L.x+ix;
+#endif
+
+    // FIXME - k values need to be properly dealt with
+    data_type kx = ix*2.*M_PI;
+    data_type ky = ((by>N/2)?by-N:by)*2.*M_PI;
+    data_type kSq = kx*kx + ky*ky;
+#ifdef DIMENSION3
+    data_type kz = ((bz>N/2)?bz-N:bz)*2.*M_PI;
+    kSq += kz*kz;
+#else
+    data_type kz = 0.;
+#endif
+
+    __shared__ cdata_type Ku_shm[TILEX];
+ 
+    if (ix < L.x) {
+        Ku_shm[tx] = *(Ku+in_idx);
+        volatile data_type diffuse = exp(-vacancydiffusion*kSq*dt);
+        Ku_shm[tx].x *= diffuse;
+        Ku_shm[tx].y *= diffuse;
+#ifdef DIMENSION3
+        Ku_shm[tx].x /= N*N*N;
+        Ku_shm[tx].y /= N*N*N;
+#else
+        Ku_shm[tx].x /= N*N;
+        Ku_shm[tx].y /= N*N;
+#endif
+        *(Ku+in_idx) = Ku_shm[tx];
+        // Division for Normalization
+    }
+    __syncthreads();
+}
+
+__host__ void
+calculateDiffusion( data_type* u, d_dim_vector L, data_type dt )
+{
+    dim3 grid(KGridSize(L));
+    dim3 tids(TILEX, 1, 1);
+    cdata_type *Ku;
+    CUDA_SAFE_CALL(cudaMalloc((void**) &Ku, sizeof(cdata_type)*LKsize(L)));
+    
+    // Fourier transform u
+    fft_r2c(g_planr2c, (fft_dtype_r*)(u+Lsize(L)*VACANCY_COMP), (fft_dtype_c*)(Ku));
+    
+    // calculateKSigma
+    d_dim_vector newL = L;
+    newL.x = L.x/2+1;
+    calculateKDiffusion<<<grid, tids>>>(Ku, newL, dt);
+    
+    // inverse Fourier kSigma
+    fft_c2r(g_planc2r, (fft_dtype_c*)(Ku), (fft_dtype_r*)(u+Lsize(L)*VACANCY_COMP));
+    CUDA_SAFE_CALL(cudaFree(Ku));
+}
+#endif
 
 __global__ void
 calculateKSigma( cdata_type* Ku, d_dim_vector L )
@@ -760,7 +952,7 @@ calculateSigma( data_type* u, data_type* sigma, d_dim_vector L )
     dim3 grid(KGridSize(L));
     dim3 tids(TILEX, 3, 3);
     cdata_type *Ku;
-    CUDA_SAFE_CALL(cudaMalloc((void**) &Ku, sizeof(cdata_type)*LKsize(L)*9));
+    CUDA_SAFE_CALL(cudaMalloc((void**) &Ku, sizeof(cdata_type)*LKsize(L)*NUM_COMP));
 
     // Fourier transform u
 #ifndef PYTHON_COMPATIBILITY_TRANSPOSE_FFT
@@ -805,7 +997,9 @@ calculateSigma( data_type* u, data_type* sigma, d_dim_vector L )
 #else
     dim3 ngrid((N+TILEX-1)/TILEX, N/2+1);
     dim3 ntids(TILEX, 3, 3);
-    calculateKSigma<<<ngrid, ntids>>>(Ku, L.x, L.y/2+1);
+    d_dim_vector newL = L;
+    newL.y = L.y/2+1;
+    calculateKSigma<<<ngrid, ntids>>>(Ku, newL);//, L.y/2+1);
 #endif
 
     // inverse Fourier kSigma
@@ -860,9 +1054,11 @@ loadSigma( data_type t, data_type* sigma, d_dim_vector L )
      
     const data_type load[3][3] = LOAD_DEF;
 
+    // matt
     *(sigma+in_idx+(i*3+j)*Lsize(L)) += 2.*mu*load[i][j]*LOADING_RATE*t; 
     if (i==j)
         *(sigma+in_idx+(i*3+j)*Lsize(L)) += 2.*mu*nu/(1-2*nu)*(load[0][0]+load[1][1]+load[2][2])*LOADING_RATE*t; 
+        //*(sigma+in_idx+(i*3+j)*Lsize(L)) += (load[0][0]+load[1][1]+load[2][2])*LOADING_RATE; 
 }
 #endif
 
@@ -871,6 +1067,7 @@ calculateFlux( data_type t, data_type* u, data_type* rhs, data_type* velocity, d
 {
     dim3 grid(GridSize(L));
     dim3 tids(TILEX, NUM_COMP);
+    dim3 tidt(TILEX, 3,3);
     data_type *sigma;
     CUDA_SAFE_CALL(cudaMalloc((void**) &sigma, sizeof(data_type)*Lsize(L)*NUM_SIG_COMP));
 
@@ -878,14 +1075,17 @@ calculateFlux( data_type t, data_type* u, data_type* rhs, data_type* velocity, d
     cudaThreadSynchronize();
 
 #ifdef LOADING
-    loadSigma<<<grid, tids>>>(t, sigma, L);
+    loadSigma<<<grid, tidt>>>(t, sigma, L);
     cudaThreadSynchronize();
 #endif
 
     // calculate flux
     centralHJ<<<grid, tids>>>(u, sigma, rhs, velocity, L);
-
     cudaThreadSynchronize();
+
+#ifdef DYNAMIC_NUCLEATION
+    updateField(rhs, 1.0/20, beta0dot, Lsize(L));
+#endif
 
     CUDA_SAFE_CALL(cudaFree(sigma));
 }
@@ -902,7 +1102,7 @@ reduceMax( data_type* u, int size )
 __host__ void
 updateField( data_type* u, data_type timeStep, data_type *rhs, int size)
 {
-    axpy(9*size, timeStep, rhs, 1, u, 1);
+    axpy(NUM_COMP*size, timeStep, rhs, 1, u, 1);
 }
 
 __host__ double
@@ -915,12 +1115,21 @@ simpleTVD( data_type* u, d_dim_vector L, data_type time, data_type endTime)
 
     calculateFlux(time, u, rhs, velocity, L);
     timestep = CFLsafeFactor / reduceMax(velocity, Lsize(L)) / N;
+
+#ifdef DYNAMIC_NUCLEATION
+    if (timestep > maxNucleationTimestep)
+        timestep = maxNucleationTimestep;
+#endif
+
     if (time+timestep > endTime)
         timestep = endTime - time + ME;
 
     updateField(u, timestep, rhs, Lsize(L));
     CUDA_SAFE_CALL(cudaFree(rhs));
     CUDA_SAFE_CALL(cudaFree(velocity));
+#ifdef VACANCIES
+    calculateDiffusion(u, L, timestep);
+#endif
     return timestep;
 } 
 
@@ -985,6 +1194,11 @@ TVD3rd( data_type* u, d_dim_vector L, data_type time, data_type endTime)
     CUDA_SAFE_CALL(cudaFree(L2));
     CUDA_SAFE_CALL(cudaFree(rhs));
     CUDA_SAFE_CALL(cudaFree(velocity));
+#ifdef VACANCIES
+    // NOTE: python uses one flux calculation for cfield whereas we
+    // instead use 3 here.  The diffusion does follow the original prescription.
+    calculateDiffusion(u, L, timestep);
+#endif
     return timestep;
 } 
 

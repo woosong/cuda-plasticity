@@ -80,12 +80,12 @@ runTest(int argc, char** argv)
     // allocate host memory for matrices M and N
     printf("  Allocate host memory for matrices.\n");
 #ifdef DIMENSION3
-    printf("    N: %d x %d x %d x 9\n", N, N, N);
-    unsigned int size = N * N * N * 9;
+    printf("    N: %d x %d x %d x %d\n", N, N, N, NUM_COMP);
+    unsigned int size = N * N * N * NUM_COMP;
     int breadth = N;
 #else
-    printf("    N: %d x %d x 9\n", N, N);
-    unsigned int size = N * N * 9;
+    printf("    N: %d x %d x %d\n", N, N, NUM_COMP);
+    unsigned int size = N * N * NUM_COMP;
     int breadth = 1;
 #endif
     unsigned int mem_size = sizeof(data_type) * size;
@@ -99,9 +99,9 @@ runTest(int argc, char** argv)
 
     double time = 0.;
 #ifndef LENGTHSCALE
-    sprintf(output_fn, FILE_PREFIX "cuda_" RUN_DESC "_%d_" PRECISION_STR "_%d_L%d.plas", N, seed, lambda);
+    sprintf(output_fn, FILE_PREFIX FILE_PREFIX2  "cuda_" RUN_DESC "_%d_" PRECISION_STR "_%d_L%d.plas", N, seed, lambda);
 #else
-    sprintf(output_fn, FILE_PREFIX "cuda_" RUN_DESC "_%d_" PRECISION_STR "_%d_L%d_l%.2f.plas", N, seed, lambda, lengthscale);
+    sprintf(output_fn, FILE_PREFIX FILE_PREFIX2  "cuda_" RUN_DESC "_%d_" PRECISION_STR "_%d_L%d_l%.2f.plas", N, seed, lambda, lengthscale);
 #endif
 
 #ifdef CONTINUE_RUN
@@ -112,7 +112,7 @@ runTest(int argc, char** argv)
         // Saved file exists
         // Load previous state 
         data_type * matrix;
-        matrix = ReadMatrixFileFunc(output_fn, 1, breadth*height*width*9+1, 1, if_quiet);
+        matrix = ReadMatrixFileFunc(output_fn, 1, breadth*height*width*NUM_COMP+1, 1, if_quiet);
         time = (double)*matrix;
         printf(" Restarting from t=%f\n", time);
         matrix++;
@@ -126,17 +126,17 @@ runTest(int argc, char** argv)
     // Load from relaxed or initialized file for runs
 #ifdef LOADING
         data_type * matrix;
-        sprintf(input_fn, FILE_PREFIX "cuda_" RELAX_RUN_DESC "_%d_" PRECISION_STR "_%d_L%d.plas", N, seed, lambda);
-        matrix = ReadMatrixFileFunc(input_fn, width, breadth*height*9, 1, if_quiet);
+        sprintf(input_fn, FILE_PREFIX FILE_PREFIX2 "cuda_" RELAX_RUN_DESC "_%d_" PRECISION_STR "_%d_L%d.plas", N, seed, lambda);
+        matrix = ReadMatrixFileFunc(input_fn, width, breadth*height*NUM_COMP, 1, if_quiet);
 #else
         double * matrix;
         //float * matrix;
 #ifndef LENGTHSCALE
-        sprintf(input_fn, FILE_PREFIX "initial_%d_%d.mat", N, seed);
+        sprintf(input_fn, FILE_PREFIX FILE_PREFIX2 "initial_%d_%d.mat", N, seed);
 #else
-        sprintf(input_fn, FILE_PREFIX "initial_%d_%d_L%.2f.mat", N, seed, lengthscale);
+        sprintf(input_fn, FILE_PREFIX FILE_PREFIX2 "initial_%d_%d_L%.2f.mat", N, seed, lengthscale);
 #endif
-        matrix = ReadDoubleMatrixFile(input_fn, width, breadth*height*9, 0, if_quiet);
+        matrix = ReadDoubleMatrixFile(input_fn, width, breadth*height*NUM_COMP, 0, if_quiet);
 #endif
         for(i = 0; i < size; i++)
             hostBetaP[i] = (data_type) matrix[i];
@@ -173,10 +173,38 @@ runTest(int argc, char** argv)
 
     CUDA_SAFE_CALL(cudaMalloc((void**) &deviceBetaP, mem_size));
 
+    setupSystem();
     printf("  Copy host memory data to device.\n");
+#ifdef DYNAMIC_NUCLEATION
+    CUDA_SAFE_CALL(cudaMalloc((void**) &beta0dot, mem_size));
+    CUDA_SAFE_CALL(cudaMemcpy(beta0dot, hostBetaP, mem_size, cudaMemcpyHostToDevice));
+    CUDA_SAFE_CALL(cudaMemset(deviceBetaP, 0, mem_size));
 
+{    d_dim_vector L;
+    L.x = width;
+    L.y = height;
+#ifdef DIMENSION3
+    L.z = breadth;
+#endif
+
+    data_type *sigma;
+    CUDA_SAFE_CALL(cudaMalloc((void**) &sigma, mem_size)); 
+    calculateSigma(beta0dot, sigma, L); 
+    cudaThreadSynchronize();
+
+    printf("max beta0 = %f\n", reduceMax(beta0dot, size));
+    double max = 0.0; for (int i=0; i<size; i++){ if (hostBetaP[i] > max) max = hostBetaP[i];}
+    printf("max host = %f\n", max);
+    double sigmax = reduceMax(sigma, size);
+    maxNucleationTimestep = 1.0/sqrt(fabs(sigmax));
+    printf("sigmax  %f\n", sigmax);
+    printf("maxNucleationTimestep = %f\n", maxNucleationTimestep);
+    CUDA_SAFE_CALL(cudaFree(sigma));
+}
+#else
     CUDA_SAFE_CALL(cudaMemcpy(deviceBetaP, hostBetaP, mem_size,
         cudaMemcpyHostToDevice));
+#endif
 
     printf("  Allocate device memory for results.\n");
 
@@ -199,7 +227,6 @@ runTest(int argc, char** argv)
     CUT_SAFE_CALL(cutCreateTimer(&timer_compute));
     CUT_SAFE_CALL(cutStartTimer(timer_compute));
 
-    setupSystem();
 
     d_dim_vector L;
     L.x = width;
@@ -210,7 +237,7 @@ runTest(int argc, char** argv)
 
     // If this is the initial slice
     if (time==0.)
-        ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*9, if_quiet); 
+        ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*NUM_COMP, if_quiet); 
 
 #ifndef DEBUG_TIMESTEPS
     while(time < endTime) {
@@ -237,7 +264,7 @@ runTest(int argc, char** argv)
         }
         cudaThreadSynchronize();
         cudaMemcpy(hostBetaP, deviceBetaP, mem_size, cudaMemcpyDeviceToHost);
-        ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*9, if_quiet); 
+        ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*NUM_COMP, if_quiet); 
     }
 #else
 #ifndef SINGLE_STEP_DEBUG
@@ -250,7 +277,7 @@ runTest(int argc, char** argv)
 
         cudaThreadSynchronize();
         cudaMemcpy(hostBetaP, deviceBetaP, mem_size, cudaMemcpyDeviceToHost);
-        ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*9, if_quiet); 
+        ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*NUM_COMP, if_quiet); 
     }
 #else
 #ifdef DIMENSION3
@@ -259,26 +286,26 @@ runTest(int argc, char** argv)
     dim3 grid(N/TILEX, N);
     dim3 tids(TILEX, 3, 3);
     data_type *sigma;
-    CUDA_SAFE_CALL(cudaMalloc((void**) &sigma, sizeof(data_type)*breadth*width*height*9));
+    CUDA_SAFE_CALL(cudaMalloc((void**) &sigma, sizeof(data_type)*breadth*width*height*NUM_SIG_COMP));
     data_type *rhs;
-    CUDA_SAFE_CALL(cudaMalloc((void**) &rhs, sizeof(data_type)*breadth*width*height*9));
+    CUDA_SAFE_CALL(cudaMalloc((void**) &rhs, sizeof(data_type)*breadth*width*height*NUM_COMP));
     data_type *velocity;
-    CUDA_SAFE_CALL(cudaMalloc((void**) &velocity, sizeof(data_type)*breadth*width*height*9));
+    CUDA_SAFE_CALL(cudaMalloc((void**) &velocity, sizeof(data_type)*breadth*width*height*NUM_COMP));
 
     calculateSigma(deviceBetaP, sigma, width, height);
     cudaThreadSynchronize();
     cudaMemcpy(hostBetaP, sigma, mem_size, cudaMemcpyDeviceToHost);
-    ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*9, if_quiet); 
+    ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*NUM_COMP, if_quiet); 
 
     // calculate flux
     centralHJ<<<grid, tids>>>(deviceBetaP, sigma, rhs, velocity, L);
 
     cudaThreadSynchronize();
     cudaMemcpy(hostBetaP, rhs, mem_size, cudaMemcpyDeviceToHost);
-    ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*9, if_quiet); 
+    ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*NUM_COMP, if_quiet); 
     
-    cudaMemcpy(hostBetaP, velocity, mem_size/9, cudaMemcpyDeviceToHost);
-    ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*9, if_quiet); 
+    cudaMemcpy(hostBetaP, velocity, mem_size/NUM_COMP, cudaMemcpyDeviceToHost);
+    ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*NUM_COMP, if_quiet); 
 #endif
 #endif
     // Make sure all threads have finished their jobs
@@ -320,9 +347,9 @@ runTest(int argc, char** argv)
     CUT_SAFE_CALL(cutDeleteTimer(timer_compute));
 
     //WriteMatrixFile("velocity.mat", hostVel, width, height, if_quiet);
-    //WriteMatrixFile("rhs.mat", hostFlux, width, 9*height, if_quiet); 
+    //WriteMatrixFile("rhs.mat", hostFlux, width, NUM_COMP*height, if_quiet); 
 #if 0 
-    for(i = 0; i < 9; i++) {
+    for(i = 0; i < NUM_SIG_COMP; i++) {
         for(int j = 0; j < height; j++) {
             for(int k = 0; k < width; k++)
                 fprintf(stdout, "%lf ", hostSigma[(i*height+j)*width+k]);
