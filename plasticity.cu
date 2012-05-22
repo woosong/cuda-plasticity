@@ -208,12 +208,15 @@ runTest(int argc, char** argv)
 
     printf("  Allocate device memory for results.\n");
 
+    // FIXME - These lines maybe allocating unused memory
+    /*
     CUDA_SAFE_CALL(cudaMalloc((void**) &deviceSigma, mem_size));
     cudaMemset(deviceSigma, 0, mem_size);
     CUDA_SAFE_CALL(cudaMalloc((void**) &deviceFlux, mem_size));
     cudaMemset(deviceFlux, 0, mem_size);
     CUDA_SAFE_CALL(cudaMalloc((void**) &deviceVel, mem_size));
     cudaMemset(deviceVel, 0, mem_size);
+    */
 
     CUT_SAFE_CALL(cutStopTimer(timer_memory));
 
@@ -336,9 +339,9 @@ runTest(int argc, char** argv)
     printf("  Copy result from device to host.\n");
 
     CUT_SAFE_CALL(cutStartTimer(timer_memory));
-    cudaMemcpy(hostSigma, deviceSigma, mem_size, cudaMemcpyDeviceToHost);
-    cudaMemcpy(hostFlux, deviceFlux, mem_size, cudaMemcpyDeviceToHost);
-    cudaMemcpy(hostVel, deviceVel, mem_size, cudaMemcpyDeviceToHost);
+    //cudaMemcpy(hostSigma, deviceSigma, mem_size, cudaMemcpyDeviceToHost);
+    //cudaMemcpy(hostFlux, deviceFlux, mem_size, cudaMemcpyDeviceToHost);
+    //cudaMemcpy(hostVel, deviceVel, mem_size, cudaMemcpyDeviceToHost);
     CUT_SAFE_CALL(cutStopTimer(timer_memory));
 
     // ================================================
@@ -375,9 +378,9 @@ runTest(int argc, char** argv)
     // ===================================================================
 
     CUDA_SAFE_CALL(cudaFree(deviceBetaP));
-    CUDA_SAFE_CALL(cudaFree(deviceSigma));
-    CUDA_SAFE_CALL(cudaFree(deviceFlux));
-    CUDA_SAFE_CALL(cudaFree(deviceVel));
+    //CUDA_SAFE_CALL(cudaFree(deviceSigma));
+    //CUDA_SAFE_CALL(cudaFree(deviceFlux));
+    //CUDA_SAFE_CALL(cudaFree(deviceVel));
 }
 
 
