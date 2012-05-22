@@ -9,6 +9,7 @@
 
 //#define TVDstep TVD3rd
 #define TVDstep simpleTVD
+#define LAST_SHOT_ONLY
 
 //#define DEBUG_TIMESTEPS
 //#define PYTHON_COMPATIBILITY
@@ -20,8 +21,8 @@
 //#define SLOPPY_NO_DIVIDE_BY_ZERO
 #define CONTINUE_RUN
 
-#define NEWGLIDEONLY
-#define RUN_DESC "ngo"
+//#define NEWGLIDEONLY
+//#define RUN_DESC "ngo"
 
 //#define SLIPSYSTEMS
 //#define mixing 0.9
@@ -40,14 +41,14 @@
 #define FILE_PREFIX ""
 #endif
 
-#define N 1024 
-#define lambda 0
+#define N 128 
+#define lambda 1
 #define CFLsafeFactor 0.5
 #define mu 0.5
 #define nu 0.3
 //#define LENGTHSCALE
 
-#define DYNAMIC_NUCLEATION
+//#define DYNAMIC_NUCLEATION
 
 //#define VACANCIES
 #ifdef VACANCIES
@@ -66,14 +67,14 @@
 #define DOUBLE
 #define LLF
 
-//#define LOADING
-//#define UNIAXIAL_ZZ
+#define LOADING
+#define UNIAXIAL_ZZ
 //#define UNIAXIAL_XX
 //#define UNIAXIAL_YY
 //#define COLDROLLING_XY
 //#define COLDROLLING_YZ
 //strain loading rate
-//#define LOADING_RATE 0.05
+#define LOADING_RATE 0.0005
 //#define LOADING_RATE 0.001
 
 #ifdef UNIAXIAL_ZZ

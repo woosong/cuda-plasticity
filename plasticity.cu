@@ -236,8 +236,10 @@ runTest(int argc, char** argv)
 #endif
 
     // If this is the initial slice
+#ifndef LAST_SHOT_ONLY
     if (time==0.)
         ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*NUM_COMP, if_quiet); 
+#endif
 
 #ifndef DEBUG_TIMESTEPS
     while(time < endTime) {
@@ -264,8 +266,14 @@ runTest(int argc, char** argv)
         }
         cudaThreadSynchronize();
         cudaMemcpy(hostBetaP, deviceBetaP, mem_size, cudaMemcpyDeviceToHost);
+#ifndef LAST_SHOT_ONLY
         ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*NUM_COMP, if_quiet); 
+#endif
     }
+#ifdef LAST_SHOT_ONLY
+    ContinueWriteMatrix( data_fp, hostBetaP, time, width, breadth*height*NUM_COMP, if_quiet);
+#endif
+
 #else
 #ifndef SINGLE_STEP_DEBUG
     int count = 0;
