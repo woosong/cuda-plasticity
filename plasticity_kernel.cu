@@ -511,11 +511,13 @@ centralHJ( data_type* u, data_type* sig, data_type* rhs, data_type* velocity, d_
         volatile data_type max = 0.;
 #ifndef SLIPSYSTEMS
         for(int k = 0; k<NUM_ELEM2; k++) {
-            volatile data_type t = v[k][idx][tx];
-            if (max < t) 
-                max = t;
-            if (max < -t)
-                max = -t;
+	    for(int axis=0; axis<3; axis++) {
+		volatile data_type t = v[k][axis][tx];
+		if (max < t) 
+		    max = t;
+		if (max < -t)
+		    max = -t;
+	    }
         }
 #else
         //slip systems need different velocities and LLF only implemented
@@ -995,6 +997,9 @@ calculateSigma( data_type* u, data_type* sigma, d_dim_vector L )
     newL.x = L.x/2+1;
     calculateKSigma<<<grid, tids>>>(Ku, newL);
 #else
+#ifdef DIMENSION3
+#error This does not work!
+#endif
     dim3 ngrid((N+TILEX-1)/TILEX, N/2+1);
     dim3 ntids(TILEX, 3, 3);
     d_dim_vector newL = L;
